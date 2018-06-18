@@ -1,0 +1,278 @@
+# Based on the
+# AQA GCSE Computer Science Pseudo-code Teaching guide
+
+# _____________________________
+# Variables and Constants
+
+# Variable assignment
+a ← 3
+b ← a + 1
+c ← 0 # Not in spec, currently operations on [NONE] are errors
+c ← c - 2
+
+# Constant assignment
+constant PI ← 3.141
+constant CLASS_SIZE ← 23
+
+# _____________________________
+# Arithmetic Operations
+
+# Standard arithmetic operations
+1 + 1
+1 - 1
+1 * 1
+1 / 1
+# Standard use using brackets to make precedence obvious. The / symbol is
+# used instead of ÷ for division (for integer division use DIV.)
+
+# Integer division
+9 DIV 5 # evaluates to 1
+5 DIV 2 # evaluates to 2
+8 DIV 4 # evaluates to 2
+
+# Modulus operator
+9 MOD 5 # evaluates to 4
+5 MOD 2 # evaluates to 1
+8 MOD 4 # evaluates to 0
+
+# _____________________________
+# Relational Operators for types that can be clearly ordered
+
+# Less than
+4 < 6
+
+# Greater than
+4.1 > 4.0
+
+# Equal to
+3 = 3
+
+# Not equal to
+True ≠ False
+
+# Less than or equal to
+3 ≤ 4
+4 ≤ 4
+
+# Greater than or equal to
+4 ≥ 3
+4.5 ≥ 4.5
+
+# _____________________________
+# Boolean Operations
+
+# Logical AND
+(3 = 3) AND (3 ≤ 4)
+
+# Logical OR
+x ← 0 # Not in spec, currently operations on [NONE] are errors
+(x < 1) OR (x > 9)
+
+# Logical NOT
+NOT (another_go = False)
+
+# _____________________________
+# Condition-controlled Iteration
+
+# Repeat-until (repeat the statements until the Boolean expression is True)
+a ← 1
+REPEAT
+	OUTPUT a
+	a ← a + 1
+UNTIL a = 4
+# will output 1, 2, 3
+
+# While (while the Boolean expression is True, repeat the statements)
+a ← 1
+WHILE a < 4
+	OUTPUT a
+	a ← a + 1
+ENDWHILE
+# will output 1, 2, 3
+
+# _____________________________
+# Count-controlled Iteration
+
+# For
+FOR a ← 1 TO 3
+	OUTPUT a
+ENDFOR
+# will output 1, 2, 3
+
+# _____________________________
+# Selection
+
+# If
+a ← 1
+IF (a MOD 2) = 0
+THEN
+	OUTPUT 'even'
+ENDIF
+
+# If-else
+a ← 1
+IF (a MOD 2) = 0
+THEN
+	OUTPUT 'even'
+ELSE
+	OUTPUT 'odd'
+ENDIF
+
+# Else-if
+a ← 1
+IF (a MOD 4) = 0
+THEN
+	OUTPUT 'multiple of 4'
+ELSE IF (a MOD 4) = 1 THEN
+	OUTPUT 'leaves a remainder of 1'
+ELSE IF (a MOD 4) = 2 THEN
+	OUTPUT 'leaves a remainder of 2'
+ELSE
+	OUTPUT 'leaves a remainder of 3'
+ENDIF
+
+# _____________________________
+# Arrays
+
+# Assignment
+primes ← [2, 3, 5, 7, 11, 13]
+
+# Accessing an element
+primes[0]
+# evaluates to 2 (questions on exam
+# papers will start indexing at
+# 0 unless specifically stated
+# otherwise)
+
+# Updating an element
+primes[5] ← 17
+# array is now [2,3,5,7,11,17]
+
+# Accessing an element in a two-dimensional array
+tables ← [ [1, 2, 3],
+           [2, 4, 6],
+           [3, 6, 9],
+           [4, 8, 12] ]
+tables[3][1]
+# evaluates to 8 as second element
+# (with index 1) of fourth array
+# (with index 3) in tables is 8
+
+# Updating an element in a two-dimensional array
+tables[3][1] ← 16
+# tables is now
+# [ [1, 2, 3],
+#   [2, 4, 6],
+#   [3, 6, 9],
+#   [4, 16, 12] ]
+
+# Array length
+LEN(primes)
+# evaluates to 6 using example above
+LEN(tables)
+# evaluates to 4 using example above
+LEN(tables[0])
+# evaluates to 3 using example above
+
+# _____________________________
+# Subroutines
+
+# Subroutine definition
+SUBROUTINE show_add(a, b)
+	result ← a + b
+	OUTPUT result
+ENDSUBROUTINE
+
+SUBROUTINE say_hi()
+	OUTPUT 'hi'
+ENDSUBROUTINE
+
+# Subroutine return value
+SUBROUTINE add(a, b)
+	result ← a + b
+	RETURN result
+ENDSUBROUTINE
+
+# Calling a subroutine
+show_add(2, 3)
+answer ← add(2, 3)
+
+# _____________________________
+# String Handling
+
+# String length
+LEN('computer science')
+# evaluates to 16 (including space)
+
+# Position of a character
+POSITION('computer science', 'm')
+# evaluates to 2 (as with arrays,
+# exam papers will start indexing
+# at 0 unless specifically stated
+# otherwise)
+
+# Substring (the substring is created by the first parameter
+# indicating the start position within the string, the second
+# parameter indicating the final position within the string and
+# the third parameter being the string itself).
+SUBSTRING(2, 9, 'computer science')
+# evaluates to 'mputer s'
+
+# Concatenation
+'computer' + 'science'
+# evaluates to 'computerscience'
+
+# _____________________________
+# String and Character Conversion
+
+# Converting string to integer
+STRING_TO_INT('16')
+# evaluates to the integer 16
+
+# Converting string to real
+STRING_TO_REAL('16.3')
+# evaluates to the real 16.3
+
+# Converting integer to string
+INT_TO_STRING(16)
+# evaluates to the string '16'
+
+# Converting real to string
+REAL_TO_STRING(16.3)
+# evaluates to the string '16.3'
+
+# Converting character to character code
+CHAR_TO_CODE('a')
+# evaluates to 97 using
+# ASCII/Unicode
+
+# Converting character code to character
+CODE_TO_CHAR(97)
+# evaluates to 'a' using
+# ASCII/Unicode
+
+# _____________________________
+# Input/Output
+
+# User input
+a ← USERINPUT
+
+# Output
+OUTPUT a
+
+# _____________________________
+# Random Number Generation
+
+# Random integer generation (between two integers inclusively)
+RANDOM_INT(3, 5)
+# will randomly generate 3, 4 or 5
+
+# _____________________________
+# Comments
+
+# Single line comments
+# comment
+
+# Multi-line comments
+# comment
+# comment and so on
