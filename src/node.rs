@@ -426,10 +426,13 @@ impl Node {
             Node::Output(n) => {
                 // Print the value of an expression
                 let v = n.eval(store)?;
-                println!("{}", match v {
-                    Value::Number(n) => n.to_string(),
-                    _ => v.string()?
-                });
+                println!(
+                    "{}",
+                    match v {
+                        Value::Number(n) => n.to_string(),
+                        _ => v.string()?,
+                    }
+                );
                 Ok(v)
             }
             Node::Input => {

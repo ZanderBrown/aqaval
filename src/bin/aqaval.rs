@@ -1,17 +1,4 @@
 #![allow(unknown_lints)]
-use builtin::init;
-use error::Syntax;
-use input::Stream;
-use parse::Parsable;
-use token::Tokens;
-
-mod builtin;
-mod error;
-mod eval;
-mod input;
-mod node;
-mod parse;
-mod token;
 
 use std::collections::HashMap;
 use std::env;
@@ -23,17 +10,23 @@ use readline::{add_history, readline, Error};
 
 // Arguments parsing lib
 extern crate getopts;
-// For the builtin random_int function
-extern crate rand;
 // Nice way to get user input in the repl
 extern crate readline;
+// Where the logic is implemented
+extern crate aqaval;
+
+use aqaval::builtin;
+use aqaval::error::Syntax;
+use aqaval::Parsable;
+use aqaval::Stream;
+use aqaval::Tokens;
 
 /// When run without argument we start a REPL prompt
 fn repl() {
     // Where variables are stored
     let mut store = HashMap::new();
     // Adds all the built in function to store
-    init(&mut store);
+    builtin(&mut store);
     // The mainloop
     'repl: loop {
         // Input buffer for multiline statements
@@ -165,7 +158,7 @@ fn main() {
                 // Root scope of variables
                 let mut store = HashMap::new();
                 // Setup the builtin functions
-                init(&mut store);
+                builtin(&mut store);
                 // Parse the string
                 match Tokens::from(Stream::from(script)).parse() {
                     Ok(n) => {
