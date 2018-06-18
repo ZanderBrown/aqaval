@@ -3,7 +3,15 @@ name = "aqaval"
 version = "0.1.0"
 authors = ["Zander Brown <ZanderBrown@users.noreply.github.com>"]
 
+[features]
+default = ["getopts", "readline"]
+
 [dependencies]
 rand = "0.5.1"
-getopts = "0.2.17"
-readline = "0.0.13"
+getopts = { version = "0.2.17", optional = true }
+readline = { version = "0.0.13", optional = true }
+
+[[bin]]
+name="aqaval"
+path="src/bin/aqaval.rs"
+required-features = ["getopts", "readline"]
