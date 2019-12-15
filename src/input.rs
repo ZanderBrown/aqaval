@@ -1,4 +1,4 @@
-use crate::error::Syntax;
+use crate::location::Point;
 
 /// Wraps a string in an iter-like structure
 /// that tracks the current line-number & column
@@ -50,9 +50,17 @@ impl Stream {
         self.input.chars().nth(self.pos)
     }
 
-    /// Generate a syntax error with msg at the current position
-    pub fn croak(&self, msg: String) -> Syntax {
-        Syntax::new(self.line, self.col, msg)
+    pub fn here(&self) -> Point {
+        Point::new(self.line, self.col)
+    }
+
+    pub fn get_source(&self, line: usize) -> Option<&str> {
+        let lines: Vec<&str> = self.input.split('\n').collect();
+        if lines.len() >= line {
+            Some(lines[line - 1])
+        } else {
+            None
+        }
     }
 }
 

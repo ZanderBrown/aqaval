@@ -1,7 +1,11 @@
 use crate::error::Syntax;
 use crate::input::Stream;
+use crate::location::Point;
+use crate::location::Range;
+
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::Deref;
 
 // Valid keybords in the language
 const KEYWORDS: [&str; 20] = [
@@ -27,9 +31,9 @@ const KEYWORDS: [&str; 20] = [
     "False",
 ];
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 /// Characters grouped by type
-pub enum Token {
+pub enum TokenType {
     // Punctuation that isn't an operator
     Punctuation(String),
     // The use of a keyword
@@ -44,27 +48,46 @@ pub enum Token {
     Text(String),
 }
 
-impl fmt::Display for Token {
+impl fmt::Display for TokenType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{}",
             match self {
-                Token::Punctuation(s) => format!(
-                    "'{}'",
-                    if s == "\n" {
-                        "\\n".into()
-                    } else {
-                        s.clone()
-                    }
-                ),
-                Token::Keyword(s) => s.to_string(),
-                Token::Operator(s) => format!("[{}]", s),
-                Token::Value(s) => format!("`{}`", s),
-                Token::Number(s) => format!("Number {}", s),
-                Token::Text(s) => format!("'{}'", s),
+                TokenType::Punctuation(s) => {
+                    format!("'{}'", if s == "\n" { "\\n".into() } else { s.clone() })
+                }
+                TokenType::Keyword(s) => s.to_string(),
+                TokenType::Operator(s) => format!("[{}]", s),
+                TokenType::Value(s) => format!("`{}`", s),
+                TokenType::Number(s) => format!("Number {}", s),
+                TokenType::Text(s) => format!("'{}'", s),
             }
         )
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Token {
+    data: TokenType,
+    range: Range,
+}
+
+impl Token {
+    pub fn new(data: TokenType, range: Range) -> Self {
+        Self { data, range }
+    }
+
+    pub fn range(&self) -> Range {
+        self.range
+    }
+}
+
+impl Deref for Token {
+    type Target = TokenType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
     }
 }
 
@@ -83,11 +106,11 @@ pub type TokResult = Result<Option<Token>, Syntax>;
 
 impl Tokens {
     /// Checks if peek() matches t
-    pub fn is(&mut self, t: &Token) -> TokResult {
+    pub fn is(&mut self, t: &TokenType) -> TokResult {
         // If there is a token to peek
         Ok(if let Some(tok) = self.peek()? {
             // And it equals t
-            if t == &tok {
+            if *t == **&tok {
                 // Return it
                 Some(tok)
             } else {
@@ -99,16 +122,22 @@ impl Tokens {
     }
 
     /// Requires the next token to be t an advances past it
-    pub fn skip(&mut self, t: &Token) -> Result<(), Syntax> {
+    pub fn skip(&mut self, t: &TokenType) -> Result<(), Syntax> {
         // If the token doesn't match
         if self.is(t)?.is_none() {
             // But there is a token
             if let Some(next) = self.next()? {
                 // Fail stating what we wanted vs found
-                Err(self.croak(format!("Expecting {} got {}", t, next)))
+                Err(Syntax::new(
+                    format!("Expecting {} got {}", t, *next),
+                    next.range(),
+                ))
             } else {
                 // Fail stating what we wanted
-                Err(self.croak(format!("Expecting {}", t)))
+                Err(Syntax::eof(
+                    format!("Expecting {}", t),
+                    Range::new(self.here(), self.here()),
+                ))
             }
         } else {
             // Advance
@@ -145,9 +174,14 @@ impl Tokens {
         }
     }
 
-    /// Wrapper of Stream::croak
-    pub fn croak(&self, msg: String) -> Syntax {
-        self.input.croak(msg)
+    /// Wrapper of Stream::here
+    pub fn here(&self) -> Point {
+        self.input.here()
+    }
+
+    /// Wrapper of Stream::get_source
+    pub fn get_source(&self, line: usize) -> Option<&str> {
+        self.input.get_source(line)
     }
 
     /// Is ch valid to start a symbol
@@ -218,6 +252,8 @@ impl Tokens {
         // Number only allowed one decimal place, track
         // if we have had one yet
         let mut has_dot = false;
+        // Where are we now
+        let start = self.here();
         // Keep reading
         let number = self.read_while(&mut |_, ch| -> bool {
             // If we found a dot
@@ -236,24 +272,29 @@ impl Tokens {
             ch.is_numeric()
         });
         // Return the built number
-        Some(Token::Number(number))
+        Some(Token::new(
+            TokenType::Number(number),
+            Range::new(start, self.here()),
+        ))
     }
 
     /// Consume an identifier
     fn read_ident(&mut self) -> Option<Token> {
+        // Get the current position
+        let start = self.here();
         // Read the identifier
         let id = self.read_while(&mut |s, ch| s.is_value_char(ch));
         // If this is a keyword
         Some(if KEYWORDS.contains(&id.as_str()) {
             // Return it as a keyword
-            Token::Keyword(id)
+            Token::new(TokenType::Keyword(id), Range::new(start, self.here()))
         // Some operators are works like MOD
         } else if self.operations.contains_key(&id) {
             // So return them as an operator
-            Token::Operator(id)
+            Token::new(TokenType::Operator(id), Range::new(start, self.here()))
         } else {
             // Just a boring symbol
-            Token::Value(id)
+            Token::new(TokenType::Value(id), Range::new(start, self.here()))
         })
     }
 
@@ -287,13 +328,18 @@ impl Tokens {
             }
         }
         // Opps we ran out of characters
-        Err(Syntax::EndOfInput("Still in string".into()))
+        Err(Syntax::eof(
+            "Still in string".into(),
+            Range::new(self.here(), self.here()),
+        ))
     }
 
     /// Get the next token
     fn read_next(&mut self) -> TokResult {
         // Skip whitespace that isn't newlines
         self.read_while(&mut |_, ch| ch != '\n' && ch.is_whitespace());
+        // Store the start
+        let start = self.here();
         // Peek the next char
         if let Some(ch) = self.input.peek() {
             // Comments start with #
@@ -301,18 +347,25 @@ impl Tokens {
                 // Just read until the end of the line
                 self.read_while(&mut |_, ch| ch != '\n');
                 // Return a newline token
-                Ok(Some(Token::Punctuation("\n".into())))
+                Ok(Some(Token::new(
+                    TokenType::Punctuation("\n".into()),
+                    Range::new(start, self.here()),
+                )))
             // Strings start with '
             } else if ch == '\'' {
                 // Read in a string and return it
-                Ok(Some(Token::Text(self.read_textual(ch)?)))
+                Ok(Some(Token::new(
+                    TokenType::Text(self.read_textual(ch)?),
+                    Range::new(start, self.here()),
+                )))
             // Number start with numbers
             } else if ch.is_numeric() {
                 Ok(self.read_number())
             // It's punctuation
             } else if self.is_punc_char(ch) {
-                Ok(Some(Token::Punctuation(
-                    self.input.next().unwrap().to_string(),
+                Ok(Some(Token::new(
+                    TokenType::Punctuation(self.input.next().unwrap().to_string()),
+                    Range::new(start, self.here()),
                 )))
             // Indentifiers must start with an alphabetic char
             } else if ch.is_alphabetic() {
@@ -320,10 +373,16 @@ impl Tokens {
             // Is this an operation
             } else if self.is_op_char(ch) {
                 let op = self.read_while(&mut |s, ch| s.is_op_char(ch));
-                Ok(Some(Token::Operator(op)))
+                Ok(Some(Token::new(
+                    TokenType::Operator(op),
+                    Range::new(start, self.here()),
+                )))
             // Don't understand this char, error out
             } else {
-                Err(self.croak(format!("Unexpected character: {}", ch)))
+                Err(Syntax::new(
+                    format!("Unexpected character: {}", ch),
+                    Range::new(start, self.here()),
+                ))
             }
         } else {
             // No more chars means no more tokens
@@ -334,7 +393,7 @@ impl Tokens {
     /// Skip newlines
     pub fn absorb_newlines(&mut self) -> Result<(), Syntax> {
         // While there are newlines
-        while let Some(m) = self.is(&Token::Punctuation("\n".into()))? {
+        while let Some(m) = self.is(&TokenType::Punctuation("\n".into()))? {
             // Skip 'em
             self.skip(&m)?;
         }

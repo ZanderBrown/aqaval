@@ -1,7 +1,9 @@
 use crate::error::Syntax;
+use crate::location::Range;
 use crate::node::Node;
 use crate::node::Subroutine;
 use crate::token::Token;
+use crate::token::TokenType;
 use crate::token::Tokens;
 
 pub type NodeResult = Result<Node, Syntax>;
@@ -9,8 +11,8 @@ pub type NodeResult = Result<Node, Syntax>;
 /// Returns a Vec of T and the matched close token
 fn delimited<T>(
     input: &mut Tokens,
-    stop: &[Token],
-    separator: &Token,
+    stop: &[TokenType],
+    separator: &TokenType,
     parser: &mut dyn FnMut(&mut Tokens) -> Result<T, Syntax>,
     err: &str,
 ) -> Result<(Vec<T>, Token), Syntax> {
@@ -22,6 +24,8 @@ fn delimited<T>(
     input.absorb_newlines()?;
     // Will be the matched close token
     let matched = 'read: loop {
+        // Cache the start
+        let start = input.here();
         // If there is more tokens available
         if input.peek()?.is_some() {
             // We have to support multiple close tokens for things like
@@ -30,7 +34,7 @@ fn delimited<T>(
                 // If we matched a stop token
                 if let Some(m) = input.is(&stop)? {
                     // Move past it
-                    input.skip(&m)?;
+                    input.skip(&*m)?;
                     // End the read loop
                     break 'read Ok(m);
                 }
@@ -57,7 +61,7 @@ fn delimited<T>(
             elements.push(parser(input)?);
         } else {
             // Run out of input without finding close token
-            break Err(Syntax::EndOfInput(err.into()));
+            break Err(Syntax::eof(err.into(), Range::new(start, input.here())));
         }
     };
     // Return the elements
@@ -72,21 +76,21 @@ fn ifelse(input: &mut Tokens) -> NodeResult {
     // We allow newlines here
     input.absorb_newlines()?;
     // Expect THEN
-    input.skip(&Token::Keyword("THEN".into()))?;
+    input.skip(&TokenType::Keyword("THEN".into()))?;
     // Parse the then block that may end with
     // an ELSE or ENDIF keyword
     let (yes, m) = block(
         input,
         &[
-            Token::Keyword("ELSE".into()),
-            Token::Keyword("ENDIF".into()),
+            TokenType::Keyword("ELSE".into()),
+            TokenType::Keyword("ENDIF".into()),
         ],
         "Still in if statement",
     )?;
     // If the closing match was ELSE
-    if m == Token::Keyword("ELSE".into()) {
+    if *m == TokenType::Keyword("ELSE".into()) {
         // And this is an ELSE IF
-        if input.is(&Token::Keyword("IF".into()))?.is_some() {
+        if input.is(&TokenType::Keyword("IF".into()))?.is_some() {
             input.next()?;
             // Recure to handle the ELSE IF, as parse as parsing
             // goes ELSE IF is just a shorthand for nested IF
@@ -100,7 +104,7 @@ fn ifelse(input: &mut Tokens) -> NodeResult {
             // No more ELSE IFs, read the ELSE
             let (no, _) = block(
                 input,
-                &[Token::Keyword("ENDIF".into())],
+                &[TokenType::Keyword("ENDIF".into())],
                 "Still in if statement",
             )?;
             Ok(Node::If(Box::new(cond), Box::new(yes), Some(Box::new(no))))
@@ -114,18 +118,18 @@ fn ifelse(input: &mut Tokens) -> NodeResult {
 /// Checks if node should be wrapped in ArrayAccess
 fn indexed(input: &mut Tokens, node: Node) -> NodeResult {
     // If there is a [ parse the indexing
-    if input.is(&Token::Punctuation("[".into()))?.is_some() {
+    if input.is(&TokenType::Punctuation("[".into()))?.is_some() {
         // Stores the levels of indexing
         let mut hole = Vec::new();
         loop {
             // Skip the opening bracket
-            input.skip(&Token::Punctuation("[".into()))?;
+            input.skip(&TokenType::Punctuation("[".into()))?;
             // Parse the index
             hole.push(expression(input)?);
             // Move over the close bracket
-            input.skip(&Token::Punctuation("]".into()))?;
+            input.skip(&TokenType::Punctuation("]".into()))?;
             // If there isn't anymore opening [
-            if input.is(&Token::Punctuation("[".into()))?.is_none() {
+            if input.is(&TokenType::Punctuation("[".into()))?.is_none() {
                 // End the loop
                 break;
             }
@@ -141,7 +145,7 @@ fn indexed(input: &mut Tokens, node: Node) -> NodeResult {
 /// node is possibly a call taget
 fn call(input: &mut Tokens, node: Node) -> NodeResult {
     // If the next token is ( it is a call
-    let node = match input.is(&Token::Punctuation(String::from("(")))? {
+    let node = match input.is(&TokenType::Punctuation(String::from("(")))? {
         // Parse any argument and wrap 'node' in a call
         Some(_) => {
             input.next()?;
@@ -149,8 +153,8 @@ fn call(input: &mut Tokens, node: Node) -> NodeResult {
             Box::new(node),
             delimited(
                 input,
-                &[Token::Punctuation(")".into())],
-                &Token::Punctuation(",".into()),
+                &[TokenType::Punctuation(")".into())],
+                &TokenType::Punctuation(",".into()),
                 &mut expression,
                 "Still providing arguments",
             )?.0,
@@ -170,49 +174,67 @@ fn atom(input: &mut Tokens) -> NodeResult {
     input.absorb_newlines()?;
     let node = if let Some(t) = input.next()? {
         // Match the token
-        match t {
+        match &*t {
             // It's a keyword
-            Token::Keyword(kw) => match kw.as_str() {
+            TokenType::Keyword(kw) => match kw.as_str() {
                 // A subroutine declaration
                 "SUBROUTINE" => {
                     // Be forgiving about newlines
                     input.absorb_newlines()?;
+                    // Where are we now
+                    let start = input.here();
                     // Now we need a name
-                    if let Some(Token::Value(name)) = input.next()? {
-                        // Parse the parameters
-                        input.skip(&Token::Punctuation("(".into()))?;
-                        let (params, _) = delimited(
-                            input,
-                            &[Token::Punctuation(")".into())],
-                            &Token::Punctuation(",".into()),
-                            &mut |input| {
-                                // We need a token
-                                if let Some(p) = input.next()? {
-                                    match p {
-                                        // That's a name
-                                        Token::Value(p) => Ok(p),
-                                        _ => Err(input.croak("Expected param name".into())),
+                    if let Some(name) = input.next()? {
+                        if let TokenType::Value(name) = &*name {
+                            // Parse the parameters
+                            input.skip(&TokenType::Punctuation("(".into()))?;
+                            let (params, _) = delimited(
+                                input,
+                                &[TokenType::Punctuation(")".into())],
+                                &TokenType::Punctuation(",".into()),
+                                &mut |input| {
+                                    // We need a token
+                                    if let Some(p) = input.next()? {
+                                        match &*p {
+                                            // That's a name
+                                            TokenType::Value(p) => Ok(p.clone()),
+                                            _ => Err(Syntax::new(
+                                                "Expected param name".into(),
+                                                p.range(),
+                                            )),
+                                        }
+                                    } else {
+                                        Err(Syntax::eof(
+                                            "Still defining parameters".into(),
+                                            Range::new(input.here(), input.here()),
+                                        ))
                                     }
-                                } else {
-                                    Err(Syntax::EndOfInput("Still defining parameters".into()))
-                                }
-                            },
-                            "Still defining parameters",
-                        )?;
-                        // Get the code block
-                        let (body, _) = block(
-                            input,
-                            &[Token::Keyword("ENDSUBROUTINE".into())],
-                            "Still in subroutine",
-                        )?;
-                        // Wrap together the name, params & body
-                        Ok(Node::Subroutine(
-                            name,
-                            params,
-                            Subroutine::Internal(Box::new(body)),
-                        ))
+                                },
+                                "Still defining parameters",
+                            )?;
+                            // Get the code block
+                            let (body, _) = block(
+                                input,
+                                &[TokenType::Keyword("ENDSUBROUTINE".into())],
+                                "Still in subroutine",
+                            )?;
+                            // Wrap together the name, params & body
+                            Ok(Node::Subroutine(
+                                name.clone(),
+                                params,
+                                Subroutine::Internal(Box::new(body)),
+                            ))
+                        } else {
+                            Err(Syntax::new(
+                                format!("Expecting subroutine name"),
+                                name.range(),
+                            ))
+                        }
                     } else {
-                        Err(input.croak("Expecting subroutine name".into()))
+                        Err(Syntax::eof(
+                            "Expecting subroutine name".into(),
+                            Range::new(start, input.here()),
+                        ))
                     }
                 }
                 // A loop that is run atleast once
@@ -220,7 +242,7 @@ fn atom(input: &mut Tokens) -> NodeResult {
                     // Grab the code block
                     let (body, _) = block(
                         input,
-                        &[Token::Keyword("UNTIL".into())],
+                        &[TokenType::Keyword("UNTIL".into())],
                         "Still in repeat statement",
                     )?;
                     // Get the limiting expression
@@ -234,14 +256,14 @@ fn atom(input: &mut Tokens) -> NodeResult {
                     // The loop body
                     let (body, _) = block(
                         input,
-                        &[Token::Keyword("ENDWHILE".into())],
+                        &[TokenType::Keyword("ENDWHILE".into())],
                         "Stil in while loop",
                     )?;
                     Ok(Node::Loop(Box::new(cond), Box::new(body), true))
                 }
                 // We seem to have reached the end of a block without being in one
                 "UNTIL" | "ENDWHILE" | "ENDSUBROUTINE" | "ELSE" | "ENDIF" => {
-                    Err(input.croak(format!("Unexpected {}", kw)))
+                    Err(Syntax::new(format!("Unexpected {}", kw), t.range()))
                 }
                 // The next expression is the response of the block
                 "RETURN" => Ok(Node::Return(Box::new(expression(input)?))),
@@ -252,40 +274,54 @@ fn atom(input: &mut Tokens) -> NodeResult {
                 "FOR" => {
                     input.absorb_newlines()?;
                     // We need a variable name to store the counter in
-                    if let Some(Token::Value(name)) = input.next()? {
-                        // For stylistic reasons we have an assign operator now
-                        input.skip(&Token::Operator(Tokens::ASSIGN.into()))?;
-                        // Initial value of the counter
-                        let start = expression(input)?;
-                        input.skip(&Token::Keyword("TO".into()))?;
-                        // Final counter value
-                        let end = expression(input)?;
-                        // Loop contents
-                        let (body, _) = block(
-                            input,
-                            &[Token::Keyword("ENDFOR".into())],
-                            "Still in for loop",
-                        )?;
-                        Ok(Node::For(
-                            name,
-                            Box::new(start),
-                            Box::new(end),
-                            Box::new(body),
-                        ))
+                    if let Some(name) = input.next()? {
+                        if let TokenType::Value(name) = &*name {
+                            // For stylistic reasons we have an assign operator now
+                            input.skip(&TokenType::Operator(Tokens::ASSIGN.into()))?;
+                            // Initial value of the counter
+                            let start = expression(input)?;
+                            input.skip(&TokenType::Keyword("TO".into()))?;
+                            // Final counter value
+                            let end = expression(input)?;
+                            // Loop contents
+                            let (body, _) = block(
+                                input,
+                                &[TokenType::Keyword("ENDFOR".into())],
+                                "Still in for loop",
+                            )?;
+                            Ok(Node::For(
+                                name.clone(),
+                                Box::new(start),
+                                Box::new(end),
+                                Box::new(body),
+                            ))
+                        } else {
+                            Err(Syntax::eof("Expected variable name".into(), name.range()))
+                        }
                     } else {
-                        Err(input.croak("Expected variable name".into()))
+                        Err(Syntax::eof(
+                            "Expected variable name".into(),
+                            Range::new(input.here(), input.here()),
+                        ))
                     }
                 }
                 // Define a constant variable
                 "constant" => {
                     // The name of the constant
-                    if let Some(Token::Value(name)) = input.next()? {
-                        input.skip(&Token::Operator(Tokens::ASSIGN.into()))?;
-                        // The value to give the constant
-                        let val = expression(input)?;
-                        Ok(Node::Constant(name, Box::new(val)))
+                    if let Some(name) = input.next()? {
+                        if let TokenType::Value(name) = &*name {
+                            input.skip(&TokenType::Operator(Tokens::ASSIGN.into()))?;
+                            // The value to give the constant
+                            let val = expression(input)?;
+                            Ok(Node::Constant(name.clone(), Box::new(val)))
+                        } else {
+                            Err(Syntax::eof("Expected constant name".into(), name.range()))
+                        }
                     } else {
-                        Err(input.croak("Expected variable name".into()))
+                        Err(Syntax::eof(
+                            "Expected constant name".into(),
+                            Range::new(input.here(), input.here()),
+                        ))
                     }
                 }
                 // Marker that the following expression should be
@@ -300,15 +336,15 @@ fn atom(input: &mut Tokens) -> NodeResult {
                 "True" => Ok(Node::Boolean(true)),
                 // And it's inverse
                 "False" => Ok(Node::Boolean(false)),
-                _ => Err(input.croak(format!("Unimplemented {}", kw))),
+                _ => Err(Syntax::new(format!("Unimplemented {}", kw), t.range())),
             },
-            Token::Punctuation(p) => match p.as_str() {
+            TokenType::Punctuation(p) => match p.as_str() {
                 // A sub expression
                 "(" => {
                     // Parse the embedded exp
                     let exp = expression(input)?;
                     // Close the bracket
-                    input.skip(&Token::Punctuation(String::from(")")))?;
+                    input.skip(&TokenType::Punctuation(String::from(")")))?;
                     Ok(exp)
                 }
                 // Array declaration
@@ -316,38 +352,44 @@ fn atom(input: &mut Tokens) -> NodeResult {
                     // Just a load of comma seperated expressions
                     let (params, _) = delimited(
                         input,
-                        &[Token::Punctuation("]".into())],
-                        &Token::Punctuation(",".into()),
+                        &[TokenType::Punctuation("]".into())],
+                        &TokenType::Punctuation(",".into()),
                         &mut expression,
                         "Still in array",
                     )?;
                     Ok(Node::Array(params))
                 }
-                _ => Err(input.croak(format!("Unexpected punctuation {}", p))),
+                _ => Err(Syntax::new(
+                    format!("Unexpected punctuation {}", p),
+                    t.range(),
+                )),
             },
             // A reference to a variable
-            Token::Value(v) => Ok(Node::Value(v)),
+            TokenType::Value(v) => Ok(Node::Value(v.clone())),
             // Literal number
-            Token::Number(v) => Ok(Node::Number(v)),
+            TokenType::Number(v) => Ok(Node::Number(v.clone())),
             // A string
-            Token::Text(v) => Ok(Node::Str(v)),
-            _ => Err(input.croak(format!("Unexpected token: {}", t))),
+            TokenType::Text(v) => Ok(Node::Str(v.clone())),
+            _ => Err(Syntax::new(format!("Unexpected token: {}", *t), t.range())),
         }
     } else {
         // There should have been further tokens
-        Err(Syntax::EndOfInput("Expected Expression".into()))
+        Err(Syntax::eof(
+            "Expected Expression".into(),
+            Range::new(input.here(), input.here()),
+        ))
     };
     // This might be a call
     call(input, node?)
 }
 
 /// A block, like the contents of an IF
-fn block(input: &mut Tokens, close: &[Token], err: &str) -> Result<(Node, Token), Syntax> {
+fn block(input: &mut Tokens, close: &[TokenType], err: &str) -> Result<(Node, Token), Syntax> {
     // A block is just a series of expressions seperated by newlines
     let (b, m) = delimited(
         input,
         close,
-        &Token::Punctuation("\n".into()),
+        &TokenType::Punctuation("\n".into()),
         &mut expression,
         err,
     )?;
@@ -358,27 +400,29 @@ fn block(input: &mut Tokens, close: &[Token], err: &str) -> Result<(Node, Token)
 /// left maybe part of a greater operation
 fn binary(input: &mut Tokens, left: Node, parent: u8) -> NodeResult {
     // The next token is an operator so this is an operation
-    if let Some(Token::Operator(v)) = input.peek()? {
-        // Lookup the precedence of the operator
-        let this = input
-            .precedence(&v)
-            .ok_or_else(|| input.croak("Unknown operator".into()))?;
-        // I'm more important
-        // (I'm afraid i don't totally understand
-        // this logic but it seems to work)
-        if this > parent {
-            // Move past the operator
-            input.next()?;
-            // Parse the right hand side
-            let atom = atom(input)?;
-            // The right hand side may itself be an operation
-            let right = binary(input, atom, this)?;
-            // And move back up the stack
-            return binary(
-                input,
-                Node::Operation(v, Box::new(left), Box::new(right)),
-                parent,
-            );
+    if let Some(tok) = input.peek()? {
+        if let TokenType::Operator(v) = &*tok {
+            // Lookup the precedence of the operator
+            let this = input
+                .precedence(&v)
+                .ok_or_else(|| Syntax::new("Unknown operator".into(), tok.range()))?;
+            // I'm more important
+            // (I'm afraid i don't totally understand
+            // this logic but it seems to work)
+            if this > parent {
+                // Move past the operator
+                input.next()?;
+                // Parse the right hand side
+                let atom = atom(input)?;
+                // The right hand side may itself be an operation
+                let right = binary(input, atom, this)?;
+                // And move back up the stack
+                return binary(
+                    input,
+                    Node::Operation(v.clone(), Box::new(left), Box::new(right)),
+                    parent,
+                );
+            }
         }
     }
     // Not an operation, pass the node though
@@ -414,7 +458,14 @@ impl Parsable for Tokens {
             // Skip any following newline
             self.absorb_newlines()?;
         }
-        // Return the root node
-        Ok(Node::Block(prog))
+        if let Some(end) = self.next()? {
+            Err(Syntax::new(
+                format!("Expected the end, got {}", *end),
+                end.range(),
+            ))
+        } else {
+            // Return the root node
+            Ok(Node::Block(prog))
+        }
     }
 }

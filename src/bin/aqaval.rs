@@ -1,14 +1,14 @@
 #![allow(unknown_lints)]
 
-use std::error::Error;
 use std::collections::HashMap;
 use std::env;
+use std::error::Error;
 use std::fs::read_to_string;
 use std::path::Path;
 
+use ansi_term::{Colour, Style};
 use getopts::Options;
 use linefeed::{Interface, ReadResult};
-use ansi_term::{Colour, Style};
 
 use aqaval::builtin;
 use aqaval::error::Syntax;
@@ -22,9 +22,6 @@ fn repl() -> Result<(), Box<dyn Error>> {
     let mut store = HashMap::new();
     // Adds all the built in function to store
     builtin(&mut store);
-
-    #[cfg(windows)]
-    ansi_term::enable_ansi_support();
 
     let reader = Interface::new("aqaval")?;
 
@@ -79,29 +76,38 @@ fn repl() -> Result<(), Box<dyn Error>> {
                 }
                 // Add the line to the buffer
                 building += &(line + "\n");
+                // Token stream
+                let mut tokens = Tokens::from(Stream::from(building.clone()));
                 // Try to parse the buffer
-                match Tokens::from(Stream::from(building.clone())).parse() {
+                match tokens.parse() {
                     // Success! Break out the loop returning
                     // the parsed statement
                     Ok(n) => break n,
                     // It failed because further input was expected
-                    Err(e) => if let Syntax::EndOfInput(_) = e {
-                        // So read more input to the buffer
-                        continue 'moreinput;
-                    // Bad syntax
-                    } else {
-                        // Report the error
-                        eprintln!("{} at {}", Colour::Red.bold().paint("↑"), e);
-                        // Clear the buffer and try again
-                        continue 'repl;
-                    },
+                    Err(e) => {
+                        if let Syntax::EndOfInput(_, _) = e {
+                            // So read more input to the buffer
+                            continue 'moreinput;
+                        // Bad syntax
+                        } else {
+                            // Report the error
+                            eprintln!("{} at {}", Colour::Red.bold().paint("↑"), e.at());
+                            e.print(Some(&tokens));
+                            // Clear the buffer and try again
+                            continue 'repl;
+                        }
+                    }
                 }
             }
         };
         // Evaluate the parsed statement
         match ast.eval(&mut store) {
             // Print the result
-            Ok(v) => println!("{} {}", Colour::Cyan.bold().paint("→"), Style::new().italic().paint(format!("{}", v))),
+            Ok(v) => println!(
+                "{} {}",
+                Colour::Cyan.bold().paint("→"),
+                Style::new().italic().paint(format!("{}", v))
+            ),
             // Print the runtime error
             Err(e) => eprintln!("{} at {}", Colour::Red.bold().paint("↑"), e),
         }
@@ -110,6 +116,9 @@ fn repl() -> Result<(), Box<dyn Error>> {
 
 // The entry point
 fn main() -> Result<(), Box<dyn Error>> {
+    #[cfg(windows)]
+    ansi_term::enable_ansi_support();
+
     // Fetch the arguments into an array
     let arguments: Vec<String> = env::args().collect();
     let program = arguments[0].clone();
@@ -160,8 +169,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let mut store = HashMap::new();
                 // Setup the builtin functions
                 builtin(&mut store);
+                let mut tokens = Tokens::from(Stream::from(script));
                 // Parse the string
-                match Tokens::from(Stream::from(script)).parse() {
+                match tokens.parse() {
                     Ok(n) => {
                         // If they asked for the reverse AST debug option
                         if matches.opt_present("a") {
@@ -171,16 +181,21 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // Run the users program!
                         match n.eval(&mut store) {
                             // If they asked for the last result
-                            Ok(v) => if matches.opt_present("r") {
-                                // Print it
-                                println!("-> {}", v);
-                            },
+                            Ok(v) => {
+                                if matches.opt_present("r") {
+                                    // Print it
+                                    println!("-> {}", v);
+                                }
+                            }
                             // Something isn't right we their logic
                             Err(e) => println!("{}", e),
                         }
                     }
                     // Looks like the syntax was wrong
-                    Err(e) => println!("{}", e),
+                    Err(e) => {
+                        eprintln!("{} {}", e.at(), Colour::Red.bold().paint("Bad Input"));
+                        e.print(Some(&tokens));
+                    }
                 }
                 // If variable dumping was requested
                 if matches.opt_present("s") {

@@ -1,9 +1,9 @@
 use crate::error::Runtime;
 use crate::eval::Value;
+use crate::token::Tokens;
 use std::collections::HashMap;
 use std::fmt;
 use std::io;
-use crate::token::Tokens;
 
 /// Produces a text representation of an array of
 /// items that impl Display
@@ -36,6 +36,15 @@ pub enum Subroutine {
     Internal(Box<Node>),
 }
 
+impl fmt::Debug for Subroutine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Native(_) => write!(f, "Subroutine {{ [native] }}"),
+            Self::Internal(sub) => write!(f, "Subroutine {{ {} }}", sub),
+        }
+    }
+}
+
 impl fmt::Display for Subroutine {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -45,7 +54,7 @@ impl fmt::Display for Subroutine {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 /// A node in the syntax tree
 pub enum Node {
     /// Use of a symbol
