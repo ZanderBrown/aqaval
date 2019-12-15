@@ -1,12 +1,14 @@
 #![allow(unknown_lints)]
 
+use std::error::Error;
 use std::collections::HashMap;
 use std::env;
 use std::fs::read_to_string;
 use std::path::Path;
 
 use getopts::Options;
-use readline::{add_history, readline, Error};
+use linefeed::{Interface, ReadResult};
+use ansi_term::{Colour, Style};
 
 use aqaval::builtin;
 use aqaval::error::Syntax;
@@ -15,11 +17,17 @@ use aqaval::Stream;
 use aqaval::Tokens;
 
 /// When run without argument we start a REPL prompt
-fn repl() {
+fn repl() -> Result<(), Box<dyn Error>> {
     // Where variables are stored
     let mut store = HashMap::new();
     // Adds all the built in function to store
     builtin(&mut store);
+
+    #[cfg(windows)]
+    ansi_term::enable_ansi_support();
+
+    let reader = Interface::new("aqaval")?;
+
     // The mainloop
     'repl: loop {
         // Input buffer for multiline statements
@@ -28,80 +36,80 @@ fn repl() {
         // syntatically complete or invalid
         let ast = 'moreinput: loop {
             // We change prompt whilst building a multiline statement
-            let prompt = if building.is_empty() { "← " } else { "- " };
+            if building.is_empty() {
+                let y = Colour::Yellow.bold();
+                reader.set_prompt(&format!(
+                    "\x01{}\x02{}\x01{}\x02",
+                    y.prefix(),
+                    "← ",
+                    y.suffix()
+                ))?;
+            } else {
+                let y = Colour::Yellow.normal();
+                reader.set_prompt(&format!(
+                    "\x01{}\x02{}\x01{}\x02",
+                    y.prefix(),
+                    "- ",
+                    y.suffix()
+                ))?;
+            }
             // Try and get a line of user input
-            match readline(prompt) {
-                // We got a line
-                Ok(line) => {
-                    // They just hit enter without typing anything
-                    if line.is_empty() {
-                        // Get another line
-                        continue;
-                    }
-                    // Add the line to history
-                    if let Err(err) = add_history(&line) {
-                        println!("Problem proccesing input: {}", err);
-                    }
-                    // If we aren't building a multiline
-                    if building.is_empty() {
-                        // Match the line aganist some repl
-                        // specific keywords
-                        match line.trim() {
-                            // Quits the REPL
-                            ".quit" => return,
-                            // Shows some information and reads a new line
-                            ".about" => {
-                                println!("AQAVal by Zander Brown");
-                                continue 'moreinput;
-                            }
-                            _ => (),
-                        }
-                    }
-                    // Add the line to the buffer
-                    building += &(line + "\n");
-                    // Try to parse the buffer
-                    match Tokens::from(Stream::from(building.clone())).parse() {
-                        // Success! Break out the loop returning
-                        // the parsed statement
-                        Ok(n) => break n,
-                        // It failed because further input was expected
-                        Err(e) => if let Syntax::EndOfInput(_) = e {
-                            // So read more input to the buffer
+            if let ReadResult::Input(line) = reader.read_line()? {
+                // They just hit enter without typing anything
+                if line.is_empty() {
+                    // Get another line
+                    continue;
+                }
+                // Add the line to history
+                reader.add_history(line.clone());
+                // If we aren't building a multiline
+                if building.is_empty() {
+                    // Match the line aganist some repl
+                    // specific keywords
+                    match line.trim() {
+                        // Quits the REPL
+                        ".quit" => return Ok(()),
+                        // Shows some information and reads a new line
+                        ".about" => {
+                            println!("AQAVal by Zander Brown");
                             continue 'moreinput;
-                        // Bad syntax
-                        } else {
-                            // Report the error
-                            println!("↑ {}", e);
-                            // Clear the buffer and try again
-                            continue 'repl;
-                        },
+                        }
+                        _ => (),
                     }
                 }
-                // Couldn't get a line of input
-                Err(err) => match err {
-                    // Because Ctrl-D was sent
-                    Error::EndOfFile => {
-                        // Quit the REPL
-                        println!("[QUIT]");
-                        return;
-                    }
-                    // Something else
-                    _ => println!("Problem reading input: {}", err),
-                },
+                // Add the line to the buffer
+                building += &(line + "\n");
+                // Try to parse the buffer
+                match Tokens::from(Stream::from(building.clone())).parse() {
+                    // Success! Break out the loop returning
+                    // the parsed statement
+                    Ok(n) => break n,
+                    // It failed because further input was expected
+                    Err(e) => if let Syntax::EndOfInput(_) = e {
+                        // So read more input to the buffer
+                        continue 'moreinput;
+                    // Bad syntax
+                    } else {
+                        // Report the error
+                        eprintln!("{} at {}", Colour::Red.bold().paint("↑"), e);
+                        // Clear the buffer and try again
+                        continue 'repl;
+                    },
+                }
             }
         };
         // Evaluate the parsed statement
         match ast.eval(&mut store) {
             // Print the result
-            Ok(v) => println!("→ {}", v),
+            Ok(v) => println!("{} {}", Colour::Cyan.bold().paint("→"), Style::new().italic().paint(format!("{}", v))),
             // Print the runtime error
-            Err(e) => println!("↑ {}", e),
+            Err(e) => eprintln!("{} at {}", Colour::Red.bold().paint("↑"), e),
         }
     }
 }
 
 // The entry point
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     // Fetch the arguments into an array
     let arguments: Vec<String> = env::args().collect();
     let program = arguments[0].clone();
@@ -121,7 +129,7 @@ fn main() {
             // Display the message
             println!("{}", f);
             // Quit early
-            return;
+            return Ok(());
         }
     };
     // Help was selected
@@ -130,14 +138,14 @@ fn main() {
         let brief = format!("Usage: {} FILE", program);
         print!("{}", opts.usage(&brief));
         // Quit
-        return;
+        return Ok(());
     }
     // If a file wasn't passed
     let input = if matches.free.is_empty() {
         // Run the REPL
-        repl();
+        repl()?;
         // And exit afterwards
-        return;
+        return Ok(());
     } else {
         // Get the filename
         matches.free[0].clone()
@@ -191,4 +199,6 @@ fn main() {
         // It didn't
         println!("{} doesn't exist", input);
     }
+
+    Ok(())
 }
