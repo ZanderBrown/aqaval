@@ -1,9 +1,9 @@
-use error::Runtime;
-use eval::Value;
+use crate::error::Runtime;
+use crate::eval::Value;
 use std::collections::HashMap;
 use std::fmt;
 use std::io;
-use token::Tokens;
+use crate::token::Tokens;
 
 /// Produces a text representation of an array of
 /// items that impl Display
@@ -37,7 +37,7 @@ pub enum Subroutine {
 }
 
 impl fmt::Display for Subroutine {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Subroutine::Native(_) => write!(f, "[NATIVE"),
             Subroutine::Internal(node) => write!(f, "{}", node),
@@ -87,7 +87,7 @@ pub enum Node {
 }
 
 impl fmt::Display for Node {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Node::Value(s) => write!(f, "{}", s),
             Node::Operation(op, l, r) => write!(f, "({} {} {})", l, op, r),
@@ -250,7 +250,7 @@ impl Node {
                         match *left {
                             Node::Value(left) => {
                                 // Remove the current value
-                                let mut curr = store
+                                let curr = store
                                     .insert(left.clone(), Value::None)
                                     .map_or(Value::None, |s| s);
                                 match curr {

@@ -6,10 +6,8 @@ mod node;
 mod parse;
 mod token;
 
-// For the builtin random_int function
-extern crate rand;
 
-pub use builtin::init as builtin;
-pub use input::Stream;
-pub use parse::Parsable;
-pub use token::Tokens;
+pub use crate::builtin::init as builtin;
+pub use crate::input::Stream;
+pub use crate::parse::Parsable;
+pub use crate::token::Tokens;

@@ -1,4 +1,4 @@
-use error::Syntax;
+use crate::error::Syntax;
 
 /// Wraps a string in an iter-like structure
 /// that tracks the current line-number & column

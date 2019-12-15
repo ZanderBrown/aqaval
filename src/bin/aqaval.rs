@@ -8,13 +8,6 @@ use std::path::Path;
 use getopts::Options;
 use readline::{add_history, readline, Error};
 
-// Arguments parsing lib
-extern crate getopts;
-// Nice way to get user input in the repl
-extern crate readline;
-// Where the logic is implemented
-extern crate aqaval;
-
 use aqaval::builtin;
 use aqaval::error::Syntax;
 use aqaval::Parsable;

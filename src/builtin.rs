@@ -1,7 +1,7 @@
-use error::Runtime;
-use eval::Value;
-use node::NativeSub;
-use node::Subroutine;
+use crate::error::Runtime;
+use crate::eval::Value;
+use crate::node::NativeSub;
+use crate::node::Subroutine;
 use rand::prelude::*;
 use std::char;
 use std::collections::HashMap;
@@ -124,7 +124,7 @@ fn builtin_random_int(store: &mut HashMap<String, Value>) -> Result<Value, Runti
 }
 
 /// Declares all the builtin subroutines
-pub fn init(store: &mut Variables) {
+pub fn init(store: &mut dyn Variables) {
     store.declare_sub("LEN", &["item"], builtin_len);
     store.declare_sub("POSITION", &["string", "char"], builtin_position);
     store.declare_sub("SUBSTRING", &["start", "end", "string"], builtin_substring);

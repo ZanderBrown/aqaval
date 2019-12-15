@@ -20,7 +20,7 @@ impl Syntax {
 }
 
 impl fmt::Display for Syntax {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Syntax::General(l, c, m) => write!(f, "Syntax Error: {} [{}:{}]", m, l, c),
             Syntax::EndOfInput(m) => write!(f, "End of input: {}", m),
@@ -47,7 +47,7 @@ impl Runtime {
 }
 
 impl fmt::Display for Runtime {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Anomaly: {}", self.0)
     }
 }

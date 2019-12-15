@@ -1,8 +1,8 @@
-use error::Syntax;
-use node::Node;
-use node::Subroutine;
-use token::Token;
-use token::Tokens;
+use crate::error::Syntax;
+use crate::node::Node;
+use crate::node::Subroutine;
+use crate::token::Token;
+use crate::token::Tokens;
 
 pub type NodeResult = Result<Node, Syntax>;
 
@@ -11,7 +11,7 @@ fn delimited<T>(
     input: &mut Tokens,
     stop: &[Token],
     separator: &Token,
-    parser: &mut FnMut(&mut Tokens) -> Result<T, Syntax>,
+    parser: &mut dyn FnMut(&mut Tokens) -> Result<T, Syntax>,
     err: &str,
 ) -> Result<(Vec<T>, Token), Syntax> {
     // The list we will return

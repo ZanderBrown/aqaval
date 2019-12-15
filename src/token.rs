@@ -1,5 +1,5 @@
-use error::Syntax;
-use input::Stream;
+use crate::error::Syntax;
+use crate::input::Stream;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -45,7 +45,7 @@ pub enum Token {
 }
 
 impl fmt::Display for Token {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{}",
@@ -196,7 +196,7 @@ impl Tokens {
     }
 
     /// Consumes characters while predicate returns true
-    fn read_while(&mut self, predicate: &mut FnMut(&mut Self, char) -> bool) -> String {
+    fn read_while(&mut self, predicate: &mut dyn FnMut(&mut Self, char) -> bool) -> String {
         // The string we will return
         let mut s = String::new();
         // Read whilst charecters are still available

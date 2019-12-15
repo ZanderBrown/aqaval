@@ -1,6 +1,6 @@
-use error::Runtime;
-use node::params_as_str;
-use node::Subroutine;
+use crate::error::Runtime;
+use crate::node::params_as_str;
+use crate::node::Subroutine;
 use std::fmt;
 
 // Everything is pass by value
@@ -28,7 +28,7 @@ pub enum Value {
 }
 
 impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::None => write!(f, "[NONE]"),
             Value::Boolean(p) => write!(f, "{}", if *p { "[TRUE]" } else { "[FALSE]" }),
