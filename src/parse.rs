@@ -130,27 +130,22 @@ fn indexed(input: &mut Tokens, node: Node) -> NodeResult {
     if input.is(&TokenType::Punctuation("[".into()))?.is_some() {
         // Stores the levels of indexing
         let mut hole = Vec::new();
-        loop {
+        let e = loop {
             // Skip the opening bracket
             input.skip(&TokenType::Punctuation("[".into()))?;
             // Parse the index
             hole.push(expression(input)?);
             // Move over the close bracket
-            input.skip(&TokenType::Punctuation("]".into()))?;
+            let e = input.skip(&TokenType::Punctuation("]".into()))?;
             // If there isn't anymore opening [
             if input.is(&TokenType::Punctuation("[".into()))?.is_none() {
                 // End the loop
-                break;
+                break e;
             }
-        }
+        };
         // Wrap the passed node with the parsed indexing
-        if let Some(ref last) = hole.last() {
-            let r = node.range() + last.range();
-            Ok(Node::new(NodeType::ArrayAccess(Box::new(node), hole), r))
-        } else {
-            let r = node.range();
-            Ok(Node::new(NodeType::ArrayAccess(Box::new(node), hole), r))
-        }
+        let r = node.range() + e.range();
+        Ok(Node::new(NodeType::ArrayAccess(Box::new(node), hole), r))
     } else {
         // Nope just pass the node though
         Ok(node)
@@ -173,8 +168,8 @@ fn call(input: &mut Tokens, node: Node) -> NodeResult {
             )?;
             let r = node.range() + e.range();
             Node::new(NodeType::Call(
-            Box::new(node),
-            args,
+                Box::new(node),
+                args,
             ), r)
     }
         ,

@@ -122,28 +122,30 @@ impl Tokens {
     }
 
     /// Requires the next token to be t an advances past it
-    pub fn skip(&mut self, t: &TokenType) -> Result<(), Error> {
+    pub fn skip(&mut self, t: &TokenType) -> Result<Token, Error> {
         // If the token doesn't match
-        if self.is(t)?.is_none() {
-            // But there is a token
-            if let Some(next) = self.next()? {
-                // Fail stating what we wanted vs found
-                Err(Error::parse(
-                    format!("Expecting {} got {}", t, *next),
-                    next.range(),
-                ))
-            } else {
-                // Fail stating what we wanted
-                Err(Error::eof(
-                    format!("Expecting {}", t),
-                    Range::new(self.here(), self.here()),
-                ))
+        match self.is(t)? {
+            None => {
+                // But there is a token
+                if let Some(next) = self.next()? {
+                    // Fail stating what we wanted vs found
+                    Err(Error::parse(
+                        format!("Expecting {} got {}", t, *next),
+                        next.range(),
+                    ))
+                } else {
+                    // Fail stating what we wanted
+                    Err(Error::eof(
+                        format!("Expecting {}", t),
+                        Range::new(self.here(), self.here()),
+                    ))
+                }
             }
-        } else {
-            // Advance
-            self.next()?;
-            // Success!
-            Ok(())
+            Some(e) => {
+                // Advance
+                self.next()?;
+                Ok(e)
+            }
         }
     }
 
