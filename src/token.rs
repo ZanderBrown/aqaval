@@ -1,4 +1,4 @@
-use crate::error::Syntax;
+use crate::error::Error;
 use crate::input::Stream;
 use crate::location::Point;
 use crate::location::Range;
@@ -102,7 +102,7 @@ pub struct Tokens {
 }
 
 /// A possibly none type that may have caused a syntax error
-pub type TokResult = Result<Option<Token>, Syntax>;
+pub type TokResult = Result<Option<Token>, Error>;
 
 impl Tokens {
     /// Checks if peek() matches t
@@ -122,19 +122,19 @@ impl Tokens {
     }
 
     /// Requires the next token to be t an advances past it
-    pub fn skip(&mut self, t: &TokenType) -> Result<(), Syntax> {
+    pub fn skip(&mut self, t: &TokenType) -> Result<(), Error> {
         // If the token doesn't match
         if self.is(t)?.is_none() {
             // But there is a token
             if let Some(next) = self.next()? {
                 // Fail stating what we wanted vs found
-                Err(Syntax::new(
+                Err(Error::parse(
                     format!("Expecting {} got {}", t, *next),
                     next.range(),
                 ))
             } else {
                 // Fail stating what we wanted
-                Err(Syntax::eof(
+                Err(Error::eof(
                     format!("Expecting {}", t),
                     Range::new(self.here(), self.here()),
                 ))
@@ -299,7 +299,7 @@ impl Tokens {
     }
 
     /// Read a quoted string
-    fn read_textual(&mut self, end: char) -> Result<String, Syntax> {
+    fn read_textual(&mut self, end: char) -> Result<String, Error> {
         // Are we currently reading an escaped value
         let mut escaped = false;
         // The read string
@@ -328,7 +328,7 @@ impl Tokens {
             }
         }
         // Opps we ran out of characters
-        Err(Syntax::eof(
+        Err(Error::eof(
             "Still in string".into(),
             Range::new(self.here(), self.here()),
         ))
@@ -379,7 +379,7 @@ impl Tokens {
                 )))
             // Don't understand this char, error out
             } else {
-                Err(Syntax::new(
+                Err(Error::parse(
                     format!("Unexpected character: {}", ch),
                     Range::new(start, self.here()),
                 ))
@@ -391,7 +391,7 @@ impl Tokens {
     }
 
     /// Skip newlines
-    pub fn absorb_newlines(&mut self) -> Result<(), Syntax> {
+    pub fn absorb_newlines(&mut self) -> Result<(), Error> {
         // While there are newlines
         while let Some(m) = self.is(&TokenType::Punctuation("\n".into()))? {
             // Skip 'em

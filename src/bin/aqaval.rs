@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::env;
-use std::error::Error;
+use std::error;
 use std::fs::read_to_string;
 use std::path::Path;
 
@@ -11,13 +11,49 @@ use getopts::Options;
 use linefeed::{Interface, ReadResult};
 
 use aqaval::builtin;
-use aqaval::error::Syntax;
+use aqaval::Error;
 use aqaval::Parsable;
 use aqaval::Stream;
 use aqaval::Tokens;
 
+pub fn print_error(err: &Error, src: &Tokens) {
+    match err {
+        Error::Parse(_, at) | Error::EndOfInput(_, at) | Error::Runtime(_, Some(at)) => {
+            let line = Colour::Purple
+                .bold()
+                .paint(format!("{}", at.start().line()));
+            let sep = Colour::White.dimmed().paint("|");
+            if let Some(source) = src.get_source(at.start().line()) {
+                eprintln!("{} {}{}", line, sep, Style::default().bold().paint(source));
+            } else {
+                eprintln!("{} {} [err]", line, sep);
+            }
+            eprintln!(
+                "{:idt$} {}{:pad$}{:↑>num$}",
+                " ",
+                sep,
+                "",
+                "↑",
+                idt = line.len(),
+                pad = at.start().column(),
+                num = at.end().column() - at.start().column()
+            );
+            eprintln!(
+                "{:idt$} {}{:pad$}{}",
+                " ",
+                sep,
+                " ",
+                err.message(),
+                idt = line.len(),
+                pad = at.start().column()
+            );
+        }
+        _ => eprintln!("{}", err.message()),
+    }
+}
+
 /// When run without argument we start a REPL prompt
-fn repl() -> Result<(), Box<dyn Error>> {
+fn repl() -> Result<(), Box<dyn error::Error>> {
     // Where variables are stored
     let mut store = HashMap::new();
     // Adds all the built in function to store
@@ -31,7 +67,7 @@ fn repl() -> Result<(), Box<dyn Error>> {
         let mut building = String::new();
         // Loop continues until a statement is
         // syntatically complete or invalid
-        let ast = 'moreinput: loop {
+        let (ast, tokens) = 'moreinput: loop {
             // We change prompt whilst building a multiline statement
             if building.is_empty() {
                 let y = Colour::Yellow.bold();
@@ -82,17 +118,17 @@ fn repl() -> Result<(), Box<dyn Error>> {
                 match tokens.parse() {
                     // Success! Break out the loop returning
                     // the parsed statement
-                    Ok(n) => break n,
+                    Ok(n) => break (n, tokens),
                     // It failed because further input was expected
                     Err(e) => {
-                        if let Syntax::EndOfInput(_, _) = e {
+                        if let Error::EndOfInput(_, _) = e {
                             // So read more input to the buffer
                             continue 'moreinput;
                         // Bad syntax
                         } else {
                             // Report the error
                             eprintln!("{} at {}", Colour::Red.bold().paint("↑"), e.at());
-                            e.print(Some(&tokens));
+                            print_error(&e, &tokens);
                             // Clear the buffer and try again
                             continue 'repl;
                         }
@@ -109,13 +145,16 @@ fn repl() -> Result<(), Box<dyn Error>> {
                 Style::new().italic().paint(format!("{}", v))
             ),
             // Print the runtime error
-            Err(e) => eprintln!("{} at {}", Colour::Red.bold().paint("↑"), e),
+            Err(e) => {
+                eprintln!("{} Anomaly", Colour::Red.bold().paint("↑"));
+                print_error(&e, &tokens);
+            }
         }
     }
 }
 
 // The entry point
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn error::Error>> {
     #[cfg(windows)]
     ansi_term::enable_ansi_support();
 
@@ -188,13 +227,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             }
                             // Something isn't right we their logic
-                            Err(e) => println!("{}", e),
+                            Err(e) => {
+                                eprintln!("{} {}", e.at(), Colour::Red.bold().paint("Anomaly"));
+                                print_error(&e, &tokens);
+                            }
                         }
                     }
                     // Looks like the syntax was wrong
                     Err(e) => {
                         eprintln!("{} {}", e.at(), Colour::Red.bold().paint("Bad Input"));
-                        e.print(Some(&tokens));
+                        print_error(&e, &tokens);
                     }
                 }
                 // If variable dumping was requested

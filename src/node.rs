@@ -1,9 +1,12 @@
-use crate::error::Runtime;
-use crate::eval::Value;
-use crate::token::Tokens;
 use std::collections::HashMap;
 use std::fmt;
 use std::io;
+use std::ops::Deref;
+
+use crate::error::Error;
+use crate::eval::Value;
+use crate::location::Range;
+use crate::token::Tokens;
 
 /// Produces a text representation of an array of
 /// items that impl Display
@@ -25,7 +28,7 @@ where
 }
 
 /// The call signature of a subroutine defined outside the language
-pub type NativeSub = fn(&mut HashMap<String, Value>) -> Result<Value, Runtime>;
+pub type NativeSub = fn(&mut HashMap<String, Value>) -> Result<Value, Error>;
 
 #[derive(Clone)]
 /// The different types of subroutine
@@ -39,8 +42,8 @@ pub enum Subroutine {
 impl fmt::Debug for Subroutine {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Native(_) => write!(f, "Subroutine {{ [native] }}"),
-            Self::Internal(sub) => write!(f, "Subroutine {{ {} }}", sub),
+            Self::Native(_) => write!(f, "Subroutine {{ [NATIVE] }}"),
+            Self::Internal(sub) => write!(f, "Subroutine {{ {} }}", ***sub),
         }
     }
 }
@@ -48,15 +51,15 @@ impl fmt::Debug for Subroutine {
 impl fmt::Display for Subroutine {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Subroutine::Native(_) => write!(f, "[NATIVE"),
-            Subroutine::Internal(node) => write!(f, "{}", node),
+            Subroutine::Native(_) => write!(f, "[NATIVE]"),
+            Subroutine::Internal(node) => write!(f, "{}", ***node),
         }
     }
 }
 
 #[derive(Clone, Debug)]
 /// A node in the syntax tree
-pub enum Node {
+pub enum NodeType {
     /// Use of a symbol
     Value(String),
     /// Operation e.g. +, left exp, right exp
@@ -95,41 +98,41 @@ pub enum Node {
     Input,
 }
 
-impl fmt::Display for Node {
+impl fmt::Display for NodeType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Node::Value(s) => write!(f, "{}", s),
-            Node::Operation(op, l, r) => write!(f, "({} {} {})", l, op, r),
-            Node::If(cond, yes, no) => {
+            NodeType::Value(s) => write!(f, "{}", s),
+            NodeType::Operation(op, l, r) => write!(f, "({} {} {})", ***l, op, ***r),
+            NodeType::If(cond, yes, no) => {
                 if let Some(no) = no {
-                    writeln!(f, "IF {} THEN\n{}ELSE\n{}ENDIF", cond, yes, no)
+                    writeln!(f, "IF {} THEN\n{}ELSE\n{}ENDIF", ***cond, ***yes, ***no)
                 } else {
-                    writeln!(f, "IF {} THEN\n{}ENDIF", cond, yes)
+                    writeln!(f, "IF {} THEN\n{}ENDIF", ***cond, ***yes)
                 }
             }
-            Node::Block(b) => {
+            NodeType::Block(b) => {
                 let mut p = String::new();
                 for n in b {
-                    p += &format!("{}\n", n);
+                    p += &format!("{}\n", **n);
                 }
                 write!(f, "{}", p)
             }
-            Node::Array(arr) => write!(f, "[{}]", params_as_str(arr)),
-            Node::ArrayAccess(arr, rabbit) => write!(f, "({}){}", arr, {
+            NodeType::Array(arr) => write!(f, "[{}]", params_as_str(&**arr)),
+            NodeType::ArrayAccess(arr, rabbit) => write!(f, "({}){}", ***arr, {
                 let mut p = String::new();
                 for r in rabbit {
-                    p += &format!("[{}]", r);
+                    p += &format!("[{}]", **r);
                 }
                 p
             }),
-            Node::Subroutine(n, a, b) => write!(
+            NodeType::Subroutine(n, a, b) => write!(
                 f,
                 "SUBROUTINE {} ({})\n{}ENDSUBROUTINE",
                 n,
                 params_as_str(a),
                 b
             ),
-            Node::For(name, initial, end, body) => write!(
+            NodeType::For(name, initial, end, body) => write!(
                 f,
                 "FOR {} {} ({}) TO ({})\n{}ENDFOR",
                 name,
@@ -138,33 +141,35 @@ impl fmt::Display for Node {
                 end,
                 body
             ),
-            Node::Call(t, b) => write!(f, "{} ({})", t, params_as_str(b)),
-            Node::Return(v) => write!(f, "RETURN ({})", v),
-            Node::Constant(name, v) => write!(f, "constant {} {} ({})", name, Tokens::ASSIGN, v),
-            Node::Number(v) => write!(f, "{}", v),
-            Node::Str(v) => write!(f, "\"{}\"", v),
-            Node::Boolean(v) => write!(f, "{}", v),
-            Node::Not(v) => write!(f, "NOT ({})", v),
-            Node::Loop(cond, body, pre) => {
+            NodeType::Call(t, b) => write!(f, "{} ({})", t, params_as_str(b)),
+            NodeType::Return(v) => write!(f, "RETURN ({})", v),
+            NodeType::Constant(name, v) => {
+                write!(f, "constant {} {} ({})", name, Tokens::ASSIGN, v)
+            }
+            NodeType::Number(v) => write!(f, "{}", v),
+            NodeType::Str(v) => write!(f, "\"{}\"", v),
+            NodeType::Boolean(v) => write!(f, "{}", v),
+            NodeType::Not(v) => write!(f, "NOT ({})", v),
+            NodeType::Loop(cond, body, pre) => {
                 if *pre {
                     write!(f, "WHILE {}\n{}ENDWHILE", cond, body)
                 } else {
                     write!(f, "REPEAT\n{}UNTIL {}", body, cond)
                 }
             }
-            Node::Output(exp) => write!(f, "OUTPUT ({})", exp),
-            Node::Input => write!(f, "USERINPUT"),
+            NodeType::Output(exp) => write!(f, "OUTPUT ({})", exp),
+            NodeType::Input => write!(f, "USERINPUT"),
         }
     }
 }
 
 impl Node {
     /// 'Execute' this node
-    pub fn eval(&self, store: &mut HashMap<String, Value>) -> Result<Value, Runtime> {
-        match self {
+    pub fn eval(&self, store: &mut HashMap<String, Value>) -> Result<Value, Error> {
+        match &self.data {
             // Fetch a variable falling back to Value::None
-            Node::Value(s) => store.get(s).map_or(Ok(Value::None), |s| Ok(s.clone())),
-            Node::Block(b) => {
+            NodeType::Value(s) => store.get(s).map_or(Ok(Value::None), |s| Ok(s.clone())),
+            NodeType::Block(b) => {
                 // Initially a None value
                 let mut last = Value::None;
                 // For each node in block
@@ -182,7 +187,7 @@ impl Node {
                 // Return the last statements value
                 Ok(last)
             }
-            Node::Array(arr) => {
+            NodeType::Array(arr) => {
                 // This is an array declaration
                 // Create a new array of the same length
                 let mut collection = Vec::with_capacity(arr.len());
@@ -194,7 +199,7 @@ impl Node {
                 // Return the array
                 Ok(Value::Array(collection))
             }
-            Node::ArrayAccess(arr, hole) => {
+            NodeType::ArrayAccess(arr, hole) => {
                 // Get the value we are trying to index
                 let arr = arr.eval(store)?;
                 let mut curr = arr;
@@ -203,39 +208,38 @@ impl Node {
                     // If the value is an array we can index it
                     if let Value::Array(arr) = curr.clone() {
                         // We only support integer indexes
-                        let i = idx.eval(store)?.int()?;
+                        let i = idx.eval(store)?.int(Some(idx.range()))?;
                         if i < 0.0 {
                             // Negative indexes don't work
-                            return Err(Runtime::new(format!(
-                                "Attempt to access negative index {} in {}",
-                                i, curr
-                            )));
+                            return Err(Error::runtime(
+                                format!("Attempt to access negative index {} in {}", i, curr),
+                                Some(self.range),
+                            ));
                         } else if i as usize >= arr.len() {
                             // Index is too large for the array
-                            return Err(Runtime::new(format!(
-                                "Index {} is out of bounds for length {}",
-                                i,
-                                arr.len()
-                            )));
+                            return Err(Error::runtime(
+                                format!("Index {} is out of bounds for length {}", i, arr.len()),
+                                Some(self.range),
+                            ));
                         }
                         // Move down a level
                         curr = arr[i as usize].clone();
                     } else {
                         // But not other things
-                        return Err(Runtime::new(format!(
-                            "Can't apply index notation to {}",
-                            curr
-                        )));
+                        return Err(Error::runtime(
+                            format!("Can't apply index notation to {}", curr),
+                            Some(self.range),
+                        ));
                     }
                 }
                 // Return the value at the point indexed
                 Ok(curr)
             }
-            Node::Operation(op, left, right) => match op.as_str() {
+            NodeType::Operation(op, left, right) => match op.as_str() {
                 // It assignment
-                Tokens::ASSIGN => match (**left).clone() {
+                Tokens::ASSIGN => match (***left).clone() {
                     // Nice & simple assign to variable
-                    Node::Value(left) => {
+                    NodeType::Value(left) => {
                         // The value
                         let val = right.eval(store)?;
                         // Insert the value fetching the old one
@@ -243,21 +247,24 @@ impl Node {
                             store.insert(left.clone(), val.clone())
                         {
                             // If the value was a constant error out
-                            Err(Runtime::new(format!(
-                                "Can't assign {} to constant {} with value {}",
-                                val, left, existing
-                            )))
+                            Err(Error::runtime(
+                                format!(
+                                    "Can't assign {} to constant {} with value {}",
+                                    val, left, existing
+                                ),
+                                Some(self.range),
+                            ))
                         } else {
                             // Return the assigned value
                             Ok(val)
                         }
                     }
                     // Overwrite a value in an array
-                    Node::ArrayAccess(left, hole) => {
+                    NodeType::ArrayAccess(left, hole) => {
                         // The value we are trying to assign
                         let val = right.eval(store)?;
-                        match *left {
-                            Node::Value(left) => {
+                        match &**left {
+                            NodeType::Value(left) => {
                                 // Remove the current value
                                 let curr = store
                                     .insert(left.clone(), Value::None)
@@ -285,43 +292,56 @@ impl Node {
                                         Ok(val)
                                     }
                                     // Can't do this with non arrays
-                                    _ => Err(Runtime::new(format!(
-                                        "Can't apply index notation to {}",
-                                        curr
-                                    ))),
+                                    _ => Err(Error::runtime(
+                                        format!("Can't apply index notation to {}", curr),
+                                        Some(self.range),
+                                    )),
                                 }
                             }
                             // You can't do this to something that isn't a variable
-                            _ => Err(Runtime::new(format!("Can't assign {} to {}", right, left))),
+                            _ => Err(Error::runtime(
+                                format!("Can't assign {} to {}", right, left),
+                                Some(right.range()),
+                            )),
                         }
                     }
                     // Can't assign to things that are not an array position
                     // or variable
-                    _ => Err(Runtime::new(format!("Can't assign {} to {}", right, left))),
+                    _ => Err(Error::runtime(
+                        format!("Can't assign {} to {}", right, left),
+                        Some(right.range()),
+                    )),
                 },
                 // Map operators to their appropriate method
-                "=" => left.eval(store)?.eq(right.eval(store)?),
-                Tokens::NOT_EQUAL => left.eval(store)?.neq(right.eval(store)?),
-                "+" => left.eval(store)?.add(right.eval(store)?),
-                "-" => left.eval(store)?.sub(right.eval(store)?),
-                "*" => left.eval(store)?.mul(right.eval(store)?),
-                "/" => left.eval(store)?.div(right.eval(store)?),
-                "<" => left.eval(store)?.lt(right.eval(store)?),
-                ">" => left.eval(store)?.gt(right.eval(store)?),
-                Tokens::LESS_EQUAL => left.eval(store)?.lteq(right.eval(store)?),
-                Tokens::GREATER_EQUAL => left.eval(store)?.gteq(right.eval(store)?),
-                "DIV" => left.eval(store)?.idiv(right.eval(store)?),
-                "MOD" => left.eval(store)?.imod(right.eval(store)?),
+                "=" => left.eval(store)?.eq(right.eval(store)?, Some(self.range)),
+                Tokens::NOT_EQUAL => left.eval(store)?.neq(right.eval(store)?, Some(self.range)),
+                "+" => left.eval(store)?.add(right.eval(store)?, Some(self.range)),
+                "-" => left.eval(store)?.sub(right.eval(store)?, Some(self.range)),
+                "*" => left.eval(store)?.mul(right.eval(store)?, Some(self.range)),
+                "/" => left.eval(store)?.div(right.eval(store)?, Some(self.range)),
+                "<" => left.eval(store)?.lt(right.eval(store)?, Some(self.range)),
+                ">" => left.eval(store)?.gt(right.eval(store)?, Some(self.range)),
+                Tokens::LESS_EQUAL => left.eval(store)?.lteq(right.eval(store)?, Some(self.range)),
+                Tokens::GREATER_EQUAL => {
+                    left.eval(store)?.gteq(right.eval(store)?, Some(self.range))
+                }
+                "DIV" => left.eval(store)?.idiv(right.eval(store)?, Some(self.range)),
+                "MOD" => left.eval(store)?.imod(right.eval(store)?, Some(self.range)),
                 "OR" => Ok(Value::Boolean(
-                    left.eval(store)?.truthy()? || right.eval(store)?.truthy()?,
+                    left.eval(store)?.truthy(Some(self.range))?
+                        || right.eval(store)?.truthy(Some(self.range))?,
                 )),
                 "AND" => Ok(Value::Boolean(
-                    left.eval(store)?.truthy()? && right.eval(store)?.truthy()?,
+                    left.eval(store)?.truthy(Some(self.range))?
+                        && right.eval(store)?.truthy(Some(self.range))?,
                 )),
                 // Something has gone wrong somewhere
-                _ => Err(Runtime::new(format!("Can't handle operator {}", op))),
+                _ => Err(Error::runtime(
+                    format!("Can't handle operator {}", op),
+                    Some(self.range),
+                )),
             },
-            Node::Subroutine(name, takes, body) => {
+            NodeType::Subroutine(name, takes, body) => {
                 // Declaration of a subroutine
                 let val = Value::Subroutine(takes.clone(), body.clone());
                 // Store it
@@ -329,26 +349,30 @@ impl Node {
                 Ok(val)
             }
             // Evaluate a return expression
-            Node::Return(v) => Ok(Value::Return(Box::new(v.eval(store)?))),
-            Node::Constant(name, value) => {
+            NodeType::Return(v) => Ok(Value::Return(Box::new(v.eval(store)?))),
+            NodeType::Constant(name, value) => {
                 // Declaration of a constant
                 let value = Value::Constant(Box::new(value.eval(store)?));
                 store.insert(name.clone(), value.clone());
                 Ok(value)
             }
             // Pass though strings
-            Node::Str(v) => Ok(Value::Textual(v.clone())),
-            Node::Number(v) => {
+            NodeType::Str(v) => Ok(Value::Textual(v.clone())),
+            NodeType::Number(v) => {
                 // Parse a float from the token
                 let num = v.parse();
                 // Get the result or error out
-                let num =
-                    num.or_else(|_| Err(Runtime::new(format!("Badly formatted number {}", v))))?;
+                let num = num.or_else(|_| {
+                    Err(Error::parse(
+                        format!("Badly formatted number {}", v),
+                        self.range,
+                    ))
+                })?;
                 Ok(Value::Number(num))
             }
             // Pass though boolean values
-            Node::Boolean(b) => Ok(Value::Boolean(*b)),
-            Node::Call(func, arguments) => {
+            NodeType::Boolean(b) => Ok(Value::Boolean(*b)),
+            NodeType::Call(func, arguments) => {
                 // Call to a subroutine
                 // Fetch the thing trying to be called
                 if let Value::Subroutine(params, body) = func.eval(store)? {
@@ -379,22 +403,28 @@ impl Node {
                         }
                     } else {
                         // Number of arguments must match parameters
-                        Err(Runtime::new(format!(
-                            "Wrong number of parameters need ({}) got ({})",
-                            params_as_str(&params),
-                            params_as_str(arguments)
-                        )))
+                        Err(Error::runtime(
+                            format!(
+                                "Wrong number of parameters need ({}) got ({})",
+                                params_as_str(&params),
+                                params_as_str(&arguments)
+                            ),
+                            Some(self.range),
+                        ))
                     }
                 } else {
                     // Can't call something that isn't a subroutine
-                    Err(Runtime::new(format!("Can't call {}", func)))
+                    Err(Error::runtime(
+                        format!("Can't call {}", func),
+                        Some(self.range),
+                    ))
                 }
             }
             // Return the inverted boolean value
-            Node::Not(n) => Ok(Value::Boolean(!n.eval(store)?.truthy()?)),
-            Node::If(cond, yes, no) => {
+            NodeType::Not(n) => Ok(Value::Boolean(!n.eval(store)?.truthy(Some(n.range()))?)),
+            NodeType::If(cond, yes, no) => {
                 // If the condition is true
-                if cond.eval(store)?.truthy()? {
+                if cond.eval(store)?.truthy(Some(cond.range()))? {
                     // Run the then block
                     yes.eval(store)
                 } else if let Some(no) = no {
@@ -405,14 +435,14 @@ impl Node {
                     Ok(Value::None)
                 }
             }
-            Node::Loop(cond, body, pre) => {
+            NodeType::Loop(cond, body, pre) => {
                 let mut last = Value::None;
                 // An indefinite loop
                 loop {
                     // Pre indicates a while loop
                     if *pre {
                         // So check the condition
-                        if cond.eval(store)?.truthy()? {
+                        if cond.eval(store)?.truthy(Some(cond.range()))? {
                             // Then run the body
                             last = body.eval(store)?;
                         } else {
@@ -424,7 +454,7 @@ impl Node {
                         // A repeat loop so run the body
                         last = body.eval(store)?;
                         // Then check the condition
-                        if cond.eval(store)?.truthy()? {
+                        if cond.eval(store)?.truthy(Some(cond.range()))? {
                             // Ending the loop if it is met
                             break;
                         }
@@ -432,34 +462,37 @@ impl Node {
                 }
                 Ok(last)
             }
-            Node::Output(n) => {
+            NodeType::Output(n) => {
                 // Print the value of an expression
                 let v = n.eval(store)?;
                 println!(
                     "{}",
                     match v {
                         Value::Number(n) => n.to_string(),
-                        _ => v.string()?,
+                        _ => v.string(Some(n.range()))?,
                     }
                 );
                 Ok(v)
             }
-            Node::Input => {
+            NodeType::Input => {
                 // Buffer to read into
                 let mut input = String::new();
                 // Read a line into the buffer
-                io::stdin()
-                    .read_line(&mut input)
-                    .or_else(|_| Err(Runtime::new("Failed to get input".into())))?;
+                io::stdin().read_line(&mut input).or_else(|_| {
+                    Err(Error::runtime(
+                        "Failed to get input".into(),
+                        Some(self.range),
+                    ))
+                })?;
                 // Remove \n from the end
                 input.pop();
                 Ok(Value::Textual(input))
             }
-            Node::For(name, start, end, body) => {
+            NodeType::For(name, start, end, body) => {
                 // Initial value
-                let start = start.eval(store)?.int()?;
+                let start = start.eval(store)?.int(Some(start.range()))?;
                 // Final value
-                let end = end.eval(store)?.int()?;
+                let end = end.eval(store)?.int(Some(end.range()))?;
                 // Keep record of the orginal value
                 let before = store.insert(name.clone(), Value::Number(start));
                 // Are we counting up or down
@@ -495,26 +528,25 @@ fn array_assign_helper(
     hole: &mut Vec<Node>,
     of: &mut Value,
     val: Value,
-) -> Result<Value, Runtime> {
+) -> Result<Value, Error> {
     // If there a further level to iterate into
     if let Some(idx) = hole.pop() {
         // Indexes must be integer
-        let i = idx.eval(store)?.int()?;
+        let i = idx.eval(store)?.int(Some(idx.range()))?;
         // Can only index arrays
         if let Value::Array(ref mut arr) = of {
             // An index must be positive
             if i < 0.0 {
-                Err(Runtime::new(format!(
-                    "Attempt to access negative index {}",
-                    i
-                )))
+                Err(Error::runtime(
+                    format!("Attempt to access negative index {}", i),
+                    Some(idx.range()),
+                ))
             // And within the bounds of the array
             } else if i as usize >= arr.len() {
-                Err(Runtime::new(format!(
-                    "Index {} is out of bounds for length {}",
-                    i,
-                    arr.len()
-                )))
+                Err(Error::runtime(
+                    format!("Index {} is out of bounds for length {}", i, arr.len()),
+                    Some(idx.range()),
+                ))
             } else {
                 // Check if we need to go a level deeper
                 let res = array_assign_helper(store, hole, &mut arr[i as usize], val)?;
@@ -523,14 +555,44 @@ fn array_assign_helper(
                 Ok(Value::Array(arr.to_vec()))
             }
         } else {
-            Err(Runtime::new(format!(
-                "Can't apply index notation to {}",
-                of
-            )))
+            Err(Error::runtime(
+                format!("Can't apply index notation to {}", of),
+                Some(idx.range()),
+            ))
         }
     } else {
         // Reached the lowest level, start moving back
         // up the stack
         Ok(val)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Node {
+    data: NodeType,
+    range: Range,
+}
+
+impl Node {
+    pub fn new(data: NodeType, range: Range) -> Self {
+        Self { data, range }
+    }
+
+    pub fn range(&self) -> Range {
+        self.range
+    }
+}
+
+impl fmt::Display for Node {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.data)
+    }
+}
+
+impl Deref for Node {
+    type Target = NodeType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
     }
 }

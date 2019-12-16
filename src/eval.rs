@@ -1,6 +1,8 @@
-use crate::error::Runtime;
+use crate::error::Error;
+use crate::location::Range;
 use crate::node::params_as_str;
 use crate::node::Subroutine;
+
 use std::fmt;
 
 // Everything is pass by value
@@ -44,31 +46,35 @@ impl fmt::Display for Value {
 
 impl Value {
     /// Does this value evaluate to true
-    pub fn truthy(&self) -> Result<bool, Runtime> {
+    pub fn truthy(&self, r: Option<Range>) -> Result<bool, Error> {
         match self {
-            // Nice and simple
-            Value::Boolean(b) => Ok(*b),
             // Empty things are falsy
             Value::None => Ok(false),
-            // Numbers that aren't 0 are truthy
-            Value::Number(n) => Ok(*n != 0.0),
+            // Nice and simple
+            Value::Boolean(b) => Ok(*b),
             // Things that exist are truthy
             Value::Textual(_) => Ok(true),
+            // Numbers that aren't 0 are truthy
+            Value::Number(n) => Ok(*n != 0.0),
             // Recur for constants
-            Value::Constant(cons) => cons.truthy(),
-            _ => Err(Runtime::new(format!("Can't interpret {} as boolean", self))),
+            Value::Constant(cons) => cons.truthy(r),
+            // Hard to define, throw an error
+            _ => Err(Error::runtime(
+                format!("Can't interpret {} as boolean", self),
+                r,
+            )),
         }
     }
 
     /// Requires this value to be an integer number
-    pub fn int(&self) -> Result<f64, Runtime> {
+    pub fn int(&self, r: Option<Range>) -> Result<f64, Error> {
         match self {
             // If the value if integer
             Value::Number(n) => {
                 if (n.trunc() - *n).abs() == 0.0 {
                     Ok(*n)
                 } else {
-                    Err(Runtime::new(format!("Expected integer got {}", n)))
+                    Err(Error::runtime(format!("Expected integer got {}", n), r))
                 }
             }
             // Allow boolean to be integer
@@ -79,13 +85,16 @@ impl Value {
                     Ok(0.0)
                 }
             }
-            Value::Constant(cons) => cons.int(),
-            _ => Err(Runtime::new(format!("Expected integer got {}", self))),
+            Value::Constant(cons) => cons.int(r),
+            _ => Err(Error::runtime(
+                format!("Can't interpret {} as integer", self),
+                r,
+            )),
         }
     }
 
     /// Get the integer of this string truncating if real
-    pub fn intt(&self) -> Result<f64, Runtime> {
+    pub fn intt(&self, r: Option<Range>) -> Result<f64, Error> {
         match self {
             Value::Number(n) => Ok(n.trunc()),
             // Allow boolean to be integer
@@ -96,13 +105,16 @@ impl Value {
                     Ok(0.0)
                 }
             }
-            Value::Constant(cons) => cons.intt(),
-            _ => Err(Runtime::new(format!("Expected integer got {}", self))),
+            Value::Constant(cons) => cons.intt(r),
+            _ => Err(Error::runtime(
+                format!("Can't interpret {} as integer", self),
+                r,
+            )),
         }
     }
 
     /// Just get the contents of a number
-    pub fn real(&self) -> Result<f64, Runtime> {
+    pub fn real(&self, r: Option<Range>) -> Result<f64, Error> {
         match self {
             Value::Number(n) => Ok(*n),
             Value::Boolean(b) => {
@@ -112,201 +124,215 @@ impl Value {
                     Ok(0.0)
                 }
             }
-            Value::Constant(cons) => cons.real(),
-            _ => Err(Runtime::new(format!("Expected real got {}", self))),
+            Value::Constant(cons) => cons.real(r),
+            _ => Err(Error::runtime(
+                format!("Can't interpret {} as real", self),
+                r,
+            )),
         }
     }
 
     /// Get the string value
-    pub fn string(&self) -> Result<String, Runtime> {
+    pub fn string(&self, r: Option<Range>) -> Result<String, Error> {
         match self {
             // Booleans are implicitly strings
             Value::Boolean(b) => Ok(if *b { "True".into() } else { "False".into() }),
             Value::Textual(s) => Ok(s.to_string()),
-            Value::Constant(cons) => cons.string(),
-            _ => Err(Runtime::new(format!("Can't interpret {} as string", self))),
+            Value::Constant(cons) => cons.string(r),
+            _ => Err(Error::runtime(
+                format!("Can't interpret {} as string", self),
+                r,
+            )),
         }
     }
 
     /// Interpret a textual value as char
-    pub fn chr(&self) -> Result<char, Runtime> {
+    pub fn chr(&self, r: Option<Range>) -> Result<char, Error> {
         match self {
             Value::Textual(s) => {
                 // chars can only be 1 char long
                 if s.len() > 1 {
-                    Err(Runtime::new(format!("Can't interpret {} as char", self)))
+                    Err(Error::runtime(
+                        format!("Can't interpret {} as char", self),
+                        r,
+                    ))
                 } else {
                     // Get the characters
                     s.chars()
                         // From that the first character
                         .nth(0)
                         // Return an error is None
-                        .ok_or_else(|| Runtime::new(format!("Can't interpret {} as char", self)))
+                        .ok_or_else(|| {
+                            Error::runtime(format!("Can't interpret {} as char", self), r)
+                        })
                 }
             }
-            Value::Constant(cons) => cons.chr(),
-            _ => Err(Runtime::new(format!("Can't interpret {} as char", self))),
+            Value::Constant(cons) => cons.chr(r),
+            _ => Err(Error::runtime(
+                format!("Can't interpret {} as char", self),
+                r,
+            )),
         }
     }
 
     /// Add two values together creating a new value
-    pub fn add(&self, other: Self) -> Result<Self, Runtime> {
+    pub fn add(&self, other: Self, range: Option<Range>) -> Result<Self, Error> {
         match self {
             Value::Number(l) => match other {
                 // Numbers are easy
                 Value::Number(r) => Ok(Value::Number(l + r)),
                 // Number & strings can be concatenated
                 Value::Textual(s) => Ok(Value::Textual(format!("{}{}", l, s))),
-                _ => Err(Runtime::new(format!(
-                    "Operation {} + {} isn't supported",
-                    self, other
-                ))),
+                _ => Err(Error::runtime(
+                    format!("Operation {} + {} isn't supported", self, other),
+                    range,
+                )),
             },
             // Concatenate strings
             Value::Textual(l) => match other {
                 Value::Number(r) => Ok(Value::Textual(format!("{}{}", l, r))),
-                _ => Ok(Value::Textual(format!("{}{}", l, other.string()?))),
+                _ => Ok(Value::Textual(format!("{}{}", l, other.string(range)?))),
             },
-            Value::Constant(cons) => cons.add(other),
-            _ => Err(Runtime::new(format!(
-                "Operation {} + {} isn't supported",
-                self, other
-            ))),
+            Value::Constant(cons) => cons.add(other, range),
+            _ => Err(Error::runtime(
+                format!("Operation {} + {} isn't supported", self, other),
+                range,
+            )),
         }
     }
 
     /// Subtract other from self returning the result
-    pub fn sub(&self, other: Self) -> Result<Self, Runtime> {
+    pub fn sub(&self, other: Self, range: Option<Range>) -> Result<Self, Error> {
         match self {
             // Only numbers can be subtracted from each other
             Value::Number(l) => match other {
                 Value::Number(r) => Ok(Value::Number(l - r)),
-                _ => Err(Runtime::new(format!(
-                    "Operation {} - {} isn't supported",
-                    self, other
-                ))),
+                _ => Err(Error::runtime(
+                    format!("Operation {} - {} isn't supported", self, other),
+                    range,
+                )),
             },
-            Value::Constant(cons) => cons.sub(other),
-            _ => Err(Runtime::new(format!(
-                "Operation {} - {} isn't supported",
-                self, other
-            ))),
+            Value::Constant(cons) => cons.sub(other, range),
+            _ => Err(Error::runtime(
+                format!("Operation {} - {} isn't supported", self, other),
+                range,
+            )),
         }
     }
 
     /// Multiply this value by other
-    pub fn mul(&self, other: Self) -> Result<Self, Runtime> {
+    pub fn mul(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
         match self {
             // Only numbers can be multiplied
             Value::Number(l) => match other {
                 Value::Number(r) => Ok(Value::Number(l * r)),
-                _ => Err(Runtime::new(format!(
-                    "Operation {} * {} isn't supported",
-                    self, other
-                ))),
+                _ => Err(Error::runtime(
+                    format!("Operation {} * {} isn't supported", self, other),
+                    r,
+                )),
             },
-            Value::Constant(cons) => cons.mul(other),
-            _ => Err(Runtime::new(format!(
-                "Operation {} * {} isn't supported",
-                self, other
-            ))),
+            Value::Constant(cons) => cons.mul(other, r),
+            _ => Err(Error::runtime(
+                format!("Operation {} * {} isn't supported", self, other),
+                r,
+            )),
         }
     }
 
     /// Divide self by other
-    pub fn div(&self, other: Self) -> Result<Self, Runtime> {
+    pub fn div(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
         match self {
             // Only numbers can be divided
             Value::Number(l) => match other {
                 Value::Number(r) => Ok(Value::Number(l / r)),
-                _ => Err(Runtime::new(format!(
-                    "Operation {} / {} isn't supported",
-                    self, other
-                ))),
+                _ => Err(Error::runtime(
+                    format!("Operation {} / {} isn't supported", self, other),
+                    r,
+                )),
             },
-            Value::Constant(cons) => cons.div(other),
-            _ => Err(Runtime::new(format!(
-                "Operation {} / {} isn't supported",
-                self, other
-            ))),
+            Value::Constant(cons) => cons.div(other, r),
+            _ => Err(Error::runtime(
+                format!("Operation {} / {} isn't supported", self, other),
+                r,
+            )),
         }
     }
 
     /// Integer division
-    pub fn idiv(&self, other: Self) -> Result<Self, Runtime> {
+    pub fn idiv(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
         match self {
             Value::Number(l) => match other {
                 // Truncate the result of the division
                 Value::Number(r) => Ok(Value::Number((l / r).trunc())),
-                _ => Err(Runtime::new(format!(
-                    "Operation {} DIV {} isn't supported",
-                    self, other
-                ))),
+                _ => Err(Error::runtime(
+                    format!("Operation {} DIV {} isn't supported", self, other),
+                    r,
+                )),
             },
-            Value::Constant(cons) => cons.idiv(other),
-            _ => Err(Runtime::new(format!(
-                "Operation {} DIV {} isn't supported",
-                self, other
-            ))),
+            Value::Constant(cons) => cons.idiv(other, r),
+            _ => Err(Error::runtime(
+                format!("Operation {} DIV {} isn't supported", self, other),
+                r,
+            )),
         }
     }
 
     /// Modulo (remainder) of self & other
-    pub fn imod(&self, other: Self) -> Result<Self, Runtime> {
+    pub fn imod(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
         match self {
             Value::Number(l) => match other {
                 Value::Number(r) => Ok(Value::Number(l % r)),
-                _ => Err(Runtime::new(format!(
-                    "Operation {} MOD {} isn't supported",
-                    self, other
-                ))),
+                _ => Err(Error::runtime(
+                    format!("Operation {} MOD {} isn't supported", self, other),
+                    r,
+                )),
             },
-            Value::Constant(cons) => cons.imod(other),
-            _ => Err(Runtime::new(format!(
-                "Operation {} MOD {} isn't supported",
-                self, other
-            ))),
+            Value::Constant(cons) => cons.imod(other, r),
+            _ => Err(Error::runtime(
+                format!("Operation {} MOD {} isn't supported", self, other),
+                r,
+            )),
         }
     }
 
     /// Is self less than/before other
-    pub fn lt(&self, other: Self) -> Result<Self, Runtime> {
+    pub fn lt(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
         match self {
             Value::Number(l) => match other {
                 Value::Number(r) => Ok((*l < r).into()),
-                _ => Err(Runtime::new(format!(
-                    "Operation {} < {} isn't supported",
-                    self, other
-                ))),
+                _ => Err(Error::runtime(
+                    format!("Operation {} < {} isn't supported", self, other),
+                    r,
+                )),
             },
-            Value::Constant(cons) => cons.lt(other),
-            _ => Err(Runtime::new(format!(
-                "Operation {} < {} isn't supported",
-                self, other
-            ))),
+            Value::Constant(cons) => cons.lt(other, r),
+            _ => Err(Error::runtime(
+                format!("Operation {} < {} isn't supported", self, other),
+                r,
+            )),
         }
     }
 
     /// Is self greater than other
-    pub fn gt(&self, other: Self) -> Result<Self, Runtime> {
+    pub fn gt(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
         match self {
             Value::Number(l) => match other {
                 Value::Number(r) => Ok((*l > r).into()),
-                _ => Err(Runtime::new(format!(
-                    "Operation {} > {} isn't supported",
-                    self, other
-                ))),
+                _ => Err(Error::runtime(
+                    format!("Operation {} > {} isn't supported", self, other),
+                    r,
+                )),
             },
-            Value::Constant(cons) => cons.gt(other),
-            _ => Err(Runtime::new(format!(
-                "Operation {} > {} isn't supported",
-                self, other
-            ))),
+            Value::Constant(cons) => cons.gt(other, r),
+            _ => Err(Error::runtime(
+                format!("Operation {} > {} isn't supported", self, other),
+                r,
+            )),
         }
     }
 
     /// Are self & other equal
-    pub fn eq(&self, other: Self) -> Result<Self, Runtime> {
+    pub fn eq(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
         match self {
             Value::Number(l) => match other {
                 Value::Number(r) => Ok((*l == r).into()),
@@ -318,7 +344,7 @@ impl Value {
                 Value::Textual(r) => Ok((*l == r).into()),
                 _ => Ok(false.into()),
             },
-            Value::Boolean(b) => Ok((*b == other.truthy()?).into()),
+            Value::Boolean(b) => Ok((*b == other.truthy(r)?).into()),
             Value::None => match other {
                 Value::None => Ok(true.into()),
                 _ => Ok(false.into()),
@@ -331,10 +357,11 @@ impl Value {
                 _ => Ok(false.into()),
             },
             // This should never happen
-            Value::Return(_) => Err(Runtime::new(
+            Value::Return(_) => Err(Error::runtime(
                 "Internal Error comparison against a placeholder".into(),
+                None,
             )),
-            Value::Constant(cons) => cons.eq(other),
+            Value::Constant(cons) => cons.eq(other, r),
             Value::Array(array_a) => match other {
                 Value::Array(array_b) => {
                     // If the arrays are of different lengths
@@ -345,7 +372,7 @@ impl Value {
                     // Pair up the values of the two arrays
                     for (a, b) in array_a.iter().zip(array_b.iter()) {
                         // If a & b are not equal
-                        if !a.eq(b.clone())?.truthy()? {
+                        if !a.eq(b.clone(), r)?.truthy(r)? {
                             // Then the arrays aren't
                             return Ok(false.into());
                         }
@@ -359,63 +386,68 @@ impl Value {
     }
 
     /// Not equal
-    pub fn neq(&self, other: Self) -> Result<Self, Runtime> {
+    pub fn neq(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
         // Just invert the value of eq
-        match self.eq(other)? {
+        match self.eq(other, r)? {
             Value::Boolean(b) => Ok((!b).into()),
             // This should never happen
-            _ => Err(Runtime::new(
+            _ => Err(Error::runtime(
                 "Internal Error eq returned a non-boolean".into(),
+                r,
             )),
         }
     }
 
     /// Self less than or equal to other
-    pub fn lteq(&self, other: Self) -> Result<Self, Runtime> {
+    pub fn lteq(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
         // Start by checking less than
-        match self.lt(other.clone())? {
+        match self.lt(other.clone(), r)? {
             Value::Boolean(b) => {
                 if b {
                     Ok(true.into())
                 } else {
                     // Not less than, but are they equal
-                    match self.eq(other)? {
+                    match self.eq(other, r)? {
                         Value::Boolean(b) => Ok(b.into()),
                         // This should never happen
-                        _ => Err(Runtime::new(
+                        _ => Err(Error::runtime(
                             "Internal Error eq returned a non-boolean".into(),
+                            r,
                         )),
                     }
                 }
             }
             // This should never happen
-            _ => Err(Runtime::new(
+            _ => Err(Error::runtime(
                 "Internal Error lt returned a non-boolean".into(),
+                r,
             )),
         }
     }
 
     /// Greater than or equal to
-    pub fn gteq(&self, other: Self) -> Result<Self, Runtime> {
+    pub fn gteq(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
         // Initaly check greater than
-        match self.gt(other.clone())? {
+        match self.gt(other.clone(), r)? {
             Value::Boolean(b) => {
                 if b {
                     Ok(true.into())
                 } else {
                     // Fall back to equal
-                    match self.eq(other)? {
+                    match self.eq(other, r)? {
                         Value::Boolean(b) => Ok(b.into()),
                         // This should never happen
-                        _ => Err(Runtime::new(
+                        _ => Err(Error::runtime(
                             "Internal Error eq returned a non-boolean".into(),
+                            r,
                         )),
                     }
                 }
             }
             // This should never happen
-            _ => Err(Runtime::new(
+            _ => Err(Error::runtime(
                 "Internal Error qt returned a non-boolean".into(),
+                r,
             )),
         }
     }

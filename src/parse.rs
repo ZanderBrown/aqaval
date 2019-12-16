@@ -1,21 +1,22 @@
-use crate::error::Syntax;
+use crate::error::Error;
 use crate::location::Range;
 use crate::node::Node;
+use crate::node::NodeType;
 use crate::node::Subroutine;
 use crate::token::Token;
 use crate::token::TokenType;
 use crate::token::Tokens;
 
-pub type NodeResult = Result<Node, Syntax>;
+pub type NodeResult = Result<Node, Error>;
 
 /// Returns a Vec of T and the matched close token
 fn delimited<T>(
     input: &mut Tokens,
     stop: &[TokenType],
     separator: &TokenType,
-    parser: &mut dyn FnMut(&mut Tokens) -> Result<T, Syntax>,
+    parser: &mut dyn FnMut(&mut Tokens) -> Result<T, Error>,
     err: &str,
-) -> Result<(Vec<T>, Token), Syntax> {
+) -> Result<(Vec<T>, Token), Error> {
     // The list we will return
     let mut elements: Vec<T> = Vec::new();
     // Are we still on the first element
@@ -61,7 +62,7 @@ fn delimited<T>(
             elements.push(parser(input)?);
         } else {
             // Run out of input without finding close token
-            break Err(Syntax::eof(err.into(), Range::new(start, input.here())));
+            break Err(Error::eof(err.into(), Range::new(start, input.here())));
         }
     };
     // Return the elements
@@ -95,10 +96,10 @@ fn ifelse(input: &mut Tokens) -> NodeResult {
             // Recure to handle the ELSE IF, as parse as parsing
             // goes ELSE IF is just a shorthand for nested IF
             let elif = ifelse(input)?;
-            Ok(Node::If(
-                Box::new(cond),
-                Box::new(yes),
-                Some(Box::new(elif)),
+            let r = cond.range() + elif.range();
+            Ok(Node::new(
+                NodeType::If(Box::new(cond), Box::new(yes), Some(Box::new(elif))),
+                r,
             ))
         } else {
             // No more ELSE IFs, read the ELSE
@@ -107,11 +108,19 @@ fn ifelse(input: &mut Tokens) -> NodeResult {
                 &[TokenType::Keyword("ENDIF".into())],
                 "Still in if statement",
             )?;
-            Ok(Node::If(Box::new(cond), Box::new(yes), Some(Box::new(no))))
+            let r = cond.range() + no.range();
+            Ok(Node::new(
+                NodeType::If(Box::new(cond), Box::new(yes), Some(Box::new(no))),
+                r,
+            ))
         }
     } else {
         // No else block
-        Ok(Node::If(Box::new(cond), Box::new(yes), None))
+        let r = cond.range() + yes.range();
+        Ok(Node::new(
+            NodeType::If(Box::new(cond), Box::new(yes), None),
+            r,
+        ))
     }
 }
 
@@ -135,7 +144,13 @@ fn indexed(input: &mut Tokens, node: Node) -> NodeResult {
             }
         }
         // Wrap the passed node with the parsed indexing
-        Ok(Node::ArrayAccess(Box::new(node), hole))
+        if let Some(ref last) = hole.last() {
+            let r = node.range() + last.range();
+            Ok(Node::new(NodeType::ArrayAccess(Box::new(node), hole), r))
+        } else {
+            let r = node.range();
+            Ok(Node::new(NodeType::ArrayAccess(Box::new(node), hole), r))
+        }
     } else {
         // Nope just pass the node though
         Ok(node)
@@ -149,16 +164,27 @@ fn call(input: &mut Tokens, node: Node) -> NodeResult {
         // Parse any argument and wrap 'node' in a call
         Some(_) => {
             input.next()?;
-            Node::Call(
-            Box::new(node),
-            delimited(
+            let args = delimited(
                 input,
                 &[TokenType::Punctuation(")".into())],
                 &TokenType::Punctuation(",".into()),
                 &mut expression,
                 "Still providing arguments",
-            )?.0,
-        )}
+            )?.0;
+            if let Some(ref last) = args.last() {
+                let r = node.range() + last.range();
+            Node::new(NodeType::Call(
+            Box::new(node),
+            args,
+            ), r)
+        } else {
+            let r = node.range();
+            Node::new(NodeType::Call(
+                Box::new(node),
+                args,
+                ), r)
+            }
+    }
         ,
         // It isn't just pass the node though
         None => node,
@@ -184,8 +210,8 @@ fn atom(input: &mut Tokens) -> NodeResult {
                     // Where are we now
                     let start = input.here();
                     // Now we need a name
-                    if let Some(name) = input.next()? {
-                        if let TokenType::Value(name) = &*name {
+                    if let Some(nametok) = input.next()? {
+                        if let TokenType::Value(name) = &*nametok {
                             // Parse the parameters
                             input.skip(&TokenType::Punctuation("(".into()))?;
                             let (params, _) = delimited(
@@ -198,13 +224,13 @@ fn atom(input: &mut Tokens) -> NodeResult {
                                         match &*p {
                                             // That's a name
                                             TokenType::Value(p) => Ok(p.clone()),
-                                            _ => Err(Syntax::new(
+                                            _ => Err(Error::parse(
                                                 "Expected param name".into(),
                                                 p.range(),
                                             )),
                                         }
                                     } else {
-                                        Err(Syntax::eof(
+                                        Err(Error::eof(
                                             "Still defining parameters".into(),
                                             Range::new(input.here(), input.here()),
                                         ))
@@ -218,20 +244,24 @@ fn atom(input: &mut Tokens) -> NodeResult {
                                 &[TokenType::Keyword("ENDSUBROUTINE".into())],
                                 "Still in subroutine",
                             )?;
+                            let r = nametok.range() + body.range();
                             // Wrap together the name, params & body
-                            Ok(Node::Subroutine(
-                                name.clone(),
-                                params,
-                                Subroutine::Internal(Box::new(body)),
+                            Ok(Node::new(
+                                NodeType::Subroutine(
+                                    name.clone(),
+                                    params,
+                                    Subroutine::Internal(Box::new(body)),
+                                ),
+                                r,
                             ))
                         } else {
-                            Err(Syntax::new(
+                            Err(Error::parse(
                                 format!("Expecting subroutine name"),
-                                name.range(),
+                                nametok.range(),
                             ))
                         }
                     } else {
-                        Err(Syntax::eof(
+                        Err(Error::eof(
                             "Expecting subroutine name".into(),
                             Range::new(start, input.here()),
                         ))
@@ -247,7 +277,11 @@ fn atom(input: &mut Tokens) -> NodeResult {
                     )?;
                     // Get the limiting expression
                     let cond = expression(input)?;
-                    Ok(Node::Loop(Box::new(cond), Box::new(body), false))
+                    let r = cond.range() + body.range();
+                    Ok(Node::new(
+                        NodeType::Loop(Box::new(cond), Box::new(body), false),
+                        r,
+                    ))
                 }
                 // Only run whilst an expression in true
                 "WHILE" => {
@@ -259,14 +293,22 @@ fn atom(input: &mut Tokens) -> NodeResult {
                         &[TokenType::Keyword("ENDWHILE".into())],
                         "Stil in while loop",
                     )?;
-                    Ok(Node::Loop(Box::new(cond), Box::new(body), true))
+                    let r = cond.range() + body.range();
+                    Ok(Node::new(
+                        NodeType::Loop(Box::new(cond), Box::new(body), true),
+                        r,
+                    ))
                 }
                 // We seem to have reached the end of a block without being in one
                 "UNTIL" | "ENDWHILE" | "ENDSUBROUTINE" | "ELSE" | "ENDIF" => {
-                    Err(Syntax::new(format!("Unexpected {}", kw), t.range()))
+                    Err(Error::parse(format!("Unexpected {}", kw), t.range()))
                 }
                 // The next expression is the response of the block
-                "RETURN" => Ok(Node::Return(Box::new(expression(input)?))),
+                "RETURN" => {
+                    let exp = expression(input)?;
+                    let r = t.range() + exp.range();
+                    Ok(Node::new(NodeType::Return(Box::new(exp)), r))
+                }
                 // If statements are complex so have
                 // there own parsing methon
                 "IF" => ifelse(input),
@@ -289,17 +331,21 @@ fn atom(input: &mut Tokens) -> NodeResult {
                                 &[TokenType::Keyword("ENDFOR".into())],
                                 "Still in for loop",
                             )?;
-                            Ok(Node::For(
-                                name.clone(),
-                                Box::new(start),
-                                Box::new(end),
-                                Box::new(body),
+                            let r = t.range() + body.range();
+                            Ok(Node::new(
+                                NodeType::For(
+                                    name.clone(),
+                                    Box::new(start),
+                                    Box::new(end),
+                                    Box::new(body),
+                                ),
+                                r,
                             ))
                         } else {
-                            Err(Syntax::eof("Expected variable name".into(), name.range()))
+                            Err(Error::eof("Expected variable name".into(), name.range()))
                         }
                     } else {
-                        Err(Syntax::eof(
+                        Err(Error::eof(
                             "Expected variable name".into(),
                             Range::new(input.here(), input.here()),
                         ))
@@ -313,12 +359,16 @@ fn atom(input: &mut Tokens) -> NodeResult {
                             input.skip(&TokenType::Operator(Tokens::ASSIGN.into()))?;
                             // The value to give the constant
                             let val = expression(input)?;
-                            Ok(Node::Constant(name.clone(), Box::new(val)))
+                            let r = t.range() + val.range();
+                            Ok(Node::new(
+                                NodeType::Constant(name.clone(), Box::new(val)),
+                                r,
+                            ))
                         } else {
-                            Err(Syntax::eof("Expected constant name".into(), name.range()))
+                            Err(Error::eof("Expected constant name".into(), name.range()))
                         }
                     } else {
-                        Err(Syntax::eof(
+                        Err(Error::eof(
                             "Expected constant name".into(),
                             Range::new(input.here(), input.here()),
                         ))
@@ -326,17 +376,25 @@ fn atom(input: &mut Tokens) -> NodeResult {
                 }
                 // Marker that the following expression should be
                 // treated as boolean and inverted
-                "NOT" => Ok(Node::Not(Box::new(expression(input)?))),
+                "NOT" => {
+                    let exp = expression(input)?;
+                    let r = t.range() + exp.range();
+                    Ok(Node::new(NodeType::Not(Box::new(exp)), r))
+                }
                 // Requires the next result to be a string
                 // and prints it to stdout
-                "OUTPUT" => Ok(Node::Output(Box::new(expression(input)?))),
+                "OUTPUT" => {
+                    let exp = expression(input)?;
+                    let r = t.range() + exp.range();
+                    Ok(Node::new(NodeType::Output(Box::new(exp)), r))
+                }
                 // A simple request for input
-                "USERINPUT" => Ok(Node::Input),
+                "USERINPUT" => Ok(Node::new(NodeType::Input, t.range())),
                 // A literal boolean
-                "True" => Ok(Node::Boolean(true)),
+                "True" => Ok(Node::new(NodeType::Boolean(true), t.range())),
                 // And it's inverse
-                "False" => Ok(Node::Boolean(false)),
-                _ => Err(Syntax::new(format!("Unimplemented {}", kw), t.range())),
+                "False" => Ok(Node::new(NodeType::Boolean(false), t.range())),
+                _ => Err(Error::parse(format!("Unimplemented {}", kw), t.range())),
             },
             TokenType::Punctuation(p) => match p.as_str() {
                 // A sub expression
@@ -350,31 +408,31 @@ fn atom(input: &mut Tokens) -> NodeResult {
                 // Array declaration
                 "[" => {
                     // Just a load of comma seperated expressions
-                    let (params, _) = delimited(
+                    let (params, e) = delimited(
                         input,
                         &[TokenType::Punctuation("]".into())],
                         &TokenType::Punctuation(",".into()),
                         &mut expression,
                         "Still in array",
                     )?;
-                    Ok(Node::Array(params))
+                    Ok(Node::new(NodeType::Array(params), t.range() + e.range()))
                 }
-                _ => Err(Syntax::new(
+                _ => Err(Error::parse(
                     format!("Unexpected punctuation {}", p),
                     t.range(),
                 )),
             },
             // A reference to a variable
-            TokenType::Value(v) => Ok(Node::Value(v.clone())),
+            TokenType::Value(v) => Ok(Node::new(NodeType::Value(v.clone()), t.range())),
             // Literal number
-            TokenType::Number(v) => Ok(Node::Number(v.clone())),
+            TokenType::Number(v) => Ok(Node::new(NodeType::Number(v.clone()), t.range())),
             // A string
-            TokenType::Text(v) => Ok(Node::Str(v.clone())),
-            _ => Err(Syntax::new(format!("Unexpected token: {}", *t), t.range())),
+            TokenType::Text(v) => Ok(Node::new(NodeType::Str(v.clone()), t.range())),
+            _ => Err(Error::parse(format!("Unexpected token: {}", *t), t.range())),
         }
     } else {
         // There should have been further tokens
-        Err(Syntax::eof(
+        Err(Error::eof(
             "Expected Expression".into(),
             Range::new(input.here(), input.here()),
         ))
@@ -384,7 +442,7 @@ fn atom(input: &mut Tokens) -> NodeResult {
 }
 
 /// A block, like the contents of an IF
-fn block(input: &mut Tokens, close: &[TokenType], err: &str) -> Result<(Node, Token), Syntax> {
+fn block(input: &mut Tokens, close: &[TokenType], err: &str) -> Result<(Node, Token), Error> {
     // A block is just a series of expressions seperated by newlines
     let (b, m) = delimited(
         input,
@@ -394,7 +452,12 @@ fn block(input: &mut Tokens, close: &[TokenType], err: &str) -> Result<(Node, To
         err,
     )?;
     // Return the result with the Vec<Node> wrapped as a block
-    Ok((Node::Block(b), m))
+    if let Some(ref first) = b.first() {
+        let r = first.range() + m.range();
+        Ok((Node::new(NodeType::Block(b), r), m))
+    } else {
+        Ok((Node::new(NodeType::Block(b), m.range()), m))
+    }
 }
 
 /// left maybe part of a greater operation
@@ -405,7 +468,7 @@ fn binary(input: &mut Tokens, left: Node, parent: u8) -> NodeResult {
             // Lookup the precedence of the operator
             let this = input
                 .precedence(&v)
-                .ok_or_else(|| Syntax::new("Unknown operator".into(), tok.range()))?;
+                .ok_or_else(|| Error::parse("Unknown operator".into(), tok.range()))?;
             // I'm more important
             // (I'm afraid i don't totally understand
             // this logic but it seems to work)
@@ -417,9 +480,13 @@ fn binary(input: &mut Tokens, left: Node, parent: u8) -> NodeResult {
                 // The right hand side may itself be an operation
                 let right = binary(input, atom, this)?;
                 // And move back up the stack
+                let r = tok.range() + right.range();
                 return binary(
                     input,
-                    Node::Operation(v.clone(), Box::new(left), Box::new(right)),
+                    Node::new(
+                        NodeType::Operation(v.clone(), Box::new(left), Box::new(right)),
+                        r,
+                    ),
                     parent,
                 );
             }
@@ -451,6 +518,7 @@ impl Parsable for Tokens {
         let mut prog: Vec<Node> = Vec::new();
         // Move past any opening newlines
         self.absorb_newlines()?;
+        let start = self.here();
         // While there are remaining tokens
         while let Some(_) = self.peek()? {
             // Parse an expression and add it to list
@@ -458,14 +526,15 @@ impl Parsable for Tokens {
             // Skip any following newline
             self.absorb_newlines()?;
         }
+        let end = self.here();
         if let Some(end) = self.next()? {
-            Err(Syntax::new(
+            Err(Error::parse(
                 format!("Expected the end, got {}", *end),
                 end.range(),
             ))
         } else {
             // Return the root node
-            Ok(Node::Block(prog))
+            Ok(Node::new(NodeType::Block(prog), Range::new(start, end)))
         }
     }
 }
