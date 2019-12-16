@@ -28,7 +28,8 @@ where
 }
 
 /// The call signature of a subroutine defined outside the language
-pub type NativeSub = fn(&mut HashMap<String, Value>) -> Result<Value, Error>;
+/// HashMap of the scope invoked in, Range is the call (for error reporting)
+pub type NativeSub = fn(&mut HashMap<String, Value>, Range) -> Result<Value, Error>;
 
 #[derive(Clone)]
 /// The different types of subroutine
@@ -208,18 +209,18 @@ impl Node {
                     // If the value is an array we can index it
                     if let Value::Array(arr) = curr.clone() {
                         // We only support integer indexes
-                        let i = idx.eval(store)?.int(Some(idx.range()))?;
+                        let i = idx.eval(store)?.int(idx.range())?;
                         if i < 0.0 {
                             // Negative indexes don't work
                             return Err(Error::runtime(
                                 format!("Attempt to access negative index {} in {}", i, curr),
-                                Some(self.range),
+                                self.range,
                             ));
                         } else if i as usize >= arr.len() {
                             // Index is too large for the array
                             return Err(Error::runtime(
                                 format!("Index {} is out of bounds for length {}", i, arr.len()),
-                                Some(self.range),
+                                self.range,
                             ));
                         }
                         // Move down a level
@@ -228,7 +229,7 @@ impl Node {
                         // But not other things
                         return Err(Error::runtime(
                             format!("Can't apply index notation to {}", curr),
-                            Some(self.range),
+                            self.range,
                         ));
                     }
                 }
@@ -252,7 +253,7 @@ impl Node {
                                     "Can't assign {} to constant {} with value {}",
                                     val, left, existing
                                 ),
-                                Some(self.range),
+                                self.range,
                             ))
                         } else {
                             // Return the assigned value
@@ -294,14 +295,14 @@ impl Node {
                                     // Can't do this with non arrays
                                     _ => Err(Error::runtime(
                                         format!("Can't apply index notation to {}", curr),
-                                        Some(self.range),
+                                        self.range,
                                     )),
                                 }
                             }
                             // You can't do this to something that isn't a variable
                             _ => Err(Error::runtime(
                                 format!("Can't assign {} to {}", right, left),
-                                Some(right.range()),
+                                right.range(),
                             )),
                         }
                     }
@@ -309,36 +310,34 @@ impl Node {
                     // or variable
                     _ => Err(Error::runtime(
                         format!("Can't assign {} to {}", right, left),
-                        Some(right.range()),
+                        right.range(),
                     )),
                 },
                 // Map operators to their appropriate method
-                "=" => left.eval(store)?.eq(right.eval(store)?, Some(self.range)),
-                Tokens::NOT_EQUAL => left.eval(store)?.neq(right.eval(store)?, Some(self.range)),
-                "+" => left.eval(store)?.add(right.eval(store)?, Some(self.range)),
-                "-" => left.eval(store)?.sub(right.eval(store)?, Some(self.range)),
-                "*" => left.eval(store)?.mul(right.eval(store)?, Some(self.range)),
-                "/" => left.eval(store)?.div(right.eval(store)?, Some(self.range)),
-                "<" => left.eval(store)?.lt(right.eval(store)?, Some(self.range)),
-                ">" => left.eval(store)?.gt(right.eval(store)?, Some(self.range)),
-                Tokens::LESS_EQUAL => left.eval(store)?.lteq(right.eval(store)?, Some(self.range)),
-                Tokens::GREATER_EQUAL => {
-                    left.eval(store)?.gteq(right.eval(store)?, Some(self.range))
-                }
-                "DIV" => left.eval(store)?.idiv(right.eval(store)?, Some(self.range)),
-                "MOD" => left.eval(store)?.imod(right.eval(store)?, Some(self.range)),
+                "=" => left.eval(store)?.eq(right.eval(store)?, self.range),
+                Tokens::NOT_EQUAL => left.eval(store)?.neq(right.eval(store)?, self.range),
+                "+" => left.eval(store)?.add(right.eval(store)?, self.range),
+                "-" => left.eval(store)?.sub(right.eval(store)?, self.range),
+                "*" => left.eval(store)?.mul(right.eval(store)?, self.range),
+                "/" => left.eval(store)?.div(right.eval(store)?, self.range),
+                "<" => left.eval(store)?.lt(right.eval(store)?, self.range),
+                ">" => left.eval(store)?.gt(right.eval(store)?, self.range),
+                Tokens::LESS_EQUAL => left.eval(store)?.lteq(right.eval(store)?, self.range),
+                Tokens::GREATER_EQUAL => left.eval(store)?.gteq(right.eval(store)?, self.range),
+                "DIV" => left.eval(store)?.idiv(right.eval(store)?, self.range),
+                "MOD" => left.eval(store)?.imod(right.eval(store)?, self.range),
                 "OR" => Ok(Value::Boolean(
-                    left.eval(store)?.truthy(Some(self.range))?
-                        || right.eval(store)?.truthy(Some(self.range))?,
+                    left.eval(store)?.truthy(self.range)?
+                        || right.eval(store)?.truthy(self.range)?,
                 )),
                 "AND" => Ok(Value::Boolean(
-                    left.eval(store)?.truthy(Some(self.range))?
-                        && right.eval(store)?.truthy(Some(self.range))?,
+                    left.eval(store)?.truthy(self.range)?
+                        && right.eval(store)?.truthy(self.range)?,
                 )),
                 // Something has gone wrong somewhere
                 _ => Err(Error::runtime(
                     format!("Can't handle operator {}", op),
-                    Some(self.range),
+                    self.range,
                 )),
             },
             NodeType::Subroutine(name, takes, body) => {
@@ -399,7 +398,7 @@ impl Node {
                             // Evaluate the body block in the context of scope
                             Subroutine::Internal(body) => body.eval(&mut scope),
                             // Call the underlying native method
-                            Subroutine::Native(func) => func(&mut scope),
+                            Subroutine::Native(func) => func(&mut scope, self.range),
                         }
                     } else {
                         // Number of arguments must match parameters
@@ -409,22 +408,19 @@ impl Node {
                                 params_as_str(&params),
                                 params_as_str(&arguments)
                             ),
-                            Some(self.range),
+                            self.range,
                         ))
                     }
                 } else {
                     // Can't call something that isn't a subroutine
-                    Err(Error::runtime(
-                        format!("Can't call {}", func),
-                        Some(self.range),
-                    ))
+                    Err(Error::runtime(format!("Can't call {}", func), self.range))
                 }
             }
             // Return the inverted boolean value
-            NodeType::Not(n) => Ok(Value::Boolean(!n.eval(store)?.truthy(Some(n.range()))?)),
+            NodeType::Not(n) => Ok(Value::Boolean(!n.eval(store)?.truthy(n.range())?)),
             NodeType::If(cond, yes, no) => {
                 // If the condition is true
-                if cond.eval(store)?.truthy(Some(cond.range()))? {
+                if cond.eval(store)?.truthy(cond.range())? {
                     // Run the then block
                     yes.eval(store)
                 } else if let Some(no) = no {
@@ -442,7 +438,7 @@ impl Node {
                     // Pre indicates a while loop
                     if *pre {
                         // So check the condition
-                        if cond.eval(store)?.truthy(Some(cond.range()))? {
+                        if cond.eval(store)?.truthy(cond.range())? {
                             // Then run the body
                             last = body.eval(store)?;
                         } else {
@@ -454,7 +450,7 @@ impl Node {
                         // A repeat loop so run the body
                         last = body.eval(store)?;
                         // Then check the condition
-                        if cond.eval(store)?.truthy(Some(cond.range()))? {
+                        if cond.eval(store)?.truthy(cond.range())? {
                             // Ending the loop if it is met
                             break;
                         }
@@ -469,7 +465,7 @@ impl Node {
                     "{}",
                     match v {
                         Value::Number(n) => n.to_string(),
-                        _ => v.string(Some(n.range()))?,
+                        _ => v.string(n.range())?,
                     }
                 );
                 Ok(v)
@@ -478,21 +474,18 @@ impl Node {
                 // Buffer to read into
                 let mut input = String::new();
                 // Read a line into the buffer
-                io::stdin().read_line(&mut input).or_else(|_| {
-                    Err(Error::runtime(
-                        "Failed to get input".into(),
-                        Some(self.range),
-                    ))
-                })?;
+                io::stdin()
+                    .read_line(&mut input)
+                    .or_else(|_| Err(Error::runtime("Failed to get input".into(), self.range)))?;
                 // Remove \n from the end
                 input.pop();
                 Ok(Value::Textual(input))
             }
             NodeType::For(name, start, end, body) => {
                 // Initial value
-                let start = start.eval(store)?.int(Some(start.range()))?;
+                let start = start.eval(store)?.int(start.range())?;
                 // Final value
-                let end = end.eval(store)?.int(Some(end.range()))?;
+                let end = end.eval(store)?.int(end.range())?;
                 // Keep record of the orginal value
                 let before = store.insert(name.clone(), Value::Number(start));
                 // Are we counting up or down
@@ -532,20 +525,20 @@ fn array_assign_helper(
     // If there a further level to iterate into
     if let Some(idx) = hole.pop() {
         // Indexes must be integer
-        let i = idx.eval(store)?.int(Some(idx.range()))?;
+        let i = idx.eval(store)?.int(idx.range())?;
         // Can only index arrays
         if let Value::Array(ref mut arr) = of {
             // An index must be positive
             if i < 0.0 {
                 Err(Error::runtime(
                     format!("Attempt to access negative index {}", i),
-                    Some(idx.range()),
+                    idx.range(),
                 ))
             // And within the bounds of the array
             } else if i as usize >= arr.len() {
                 Err(Error::runtime(
                     format!("Index {} is out of bounds for length {}", i, arr.len()),
-                    Some(idx.range()),
+                    idx.range(),
                 ))
             } else {
                 // Check if we need to go a level deeper
@@ -557,7 +550,7 @@ fn array_assign_helper(
         } else {
             Err(Error::runtime(
                 format!("Can't apply index notation to {}", of),
-                Some(idx.range()),
+                idx.range(),
             ))
         }
     } else {

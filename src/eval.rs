@@ -46,7 +46,7 @@ impl fmt::Display for Value {
 
 impl Value {
     /// Does this value evaluate to true
-    pub fn truthy(&self, r: Option<Range>) -> Result<bool, Error> {
+    pub fn truthy(&self, r: Range) -> Result<bool, Error> {
         match self {
             // Empty things are falsy
             Value::None => Ok(false),
@@ -67,7 +67,7 @@ impl Value {
     }
 
     /// Requires this value to be an integer number
-    pub fn int(&self, r: Option<Range>) -> Result<f64, Error> {
+    pub fn int(&self, r: Range) -> Result<f64, Error> {
         match self {
             // If the value if integer
             Value::Number(n) => {
@@ -94,7 +94,7 @@ impl Value {
     }
 
     /// Get the integer of this string truncating if real
-    pub fn intt(&self, r: Option<Range>) -> Result<f64, Error> {
+    pub fn intt(&self, r: Range) -> Result<f64, Error> {
         match self {
             Value::Number(n) => Ok(n.trunc()),
             // Allow boolean to be integer
@@ -114,7 +114,7 @@ impl Value {
     }
 
     /// Just get the contents of a number
-    pub fn real(&self, r: Option<Range>) -> Result<f64, Error> {
+    pub fn real(&self, r: Range) -> Result<f64, Error> {
         match self {
             Value::Number(n) => Ok(*n),
             Value::Boolean(b) => {
@@ -133,7 +133,7 @@ impl Value {
     }
 
     /// Get the string value
-    pub fn string(&self, r: Option<Range>) -> Result<String, Error> {
+    pub fn string(&self, r: Range) -> Result<String, Error> {
         match self {
             // Booleans are implicitly strings
             Value::Boolean(b) => Ok(if *b { "True".into() } else { "False".into() }),
@@ -147,7 +147,7 @@ impl Value {
     }
 
     /// Interpret a textual value as char
-    pub fn chr(&self, r: Option<Range>) -> Result<char, Error> {
+    pub fn chr(&self, r: Range) -> Result<char, Error> {
         match self {
             Value::Textual(s) => {
                 // chars can only be 1 char long
@@ -176,7 +176,7 @@ impl Value {
     }
 
     /// Add two values together creating a new value
-    pub fn add(&self, other: Self, range: Option<Range>) -> Result<Self, Error> {
+    pub fn add(&self, other: Self, range: Range) -> Result<Self, Error> {
         match self {
             Value::Number(l) => match other {
                 // Numbers are easy
@@ -202,7 +202,7 @@ impl Value {
     }
 
     /// Subtract other from self returning the result
-    pub fn sub(&self, other: Self, range: Option<Range>) -> Result<Self, Error> {
+    pub fn sub(&self, other: Self, range: Range) -> Result<Self, Error> {
         match self {
             // Only numbers can be subtracted from each other
             Value::Number(l) => match other {
@@ -221,7 +221,7 @@ impl Value {
     }
 
     /// Multiply this value by other
-    pub fn mul(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
+    pub fn mul(&self, other: Self, r: Range) -> Result<Self, Error> {
         match self {
             // Only numbers can be multiplied
             Value::Number(l) => match other {
@@ -240,7 +240,7 @@ impl Value {
     }
 
     /// Divide self by other
-    pub fn div(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
+    pub fn div(&self, other: Self, r: Range) -> Result<Self, Error> {
         match self {
             // Only numbers can be divided
             Value::Number(l) => match other {
@@ -259,7 +259,7 @@ impl Value {
     }
 
     /// Integer division
-    pub fn idiv(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
+    pub fn idiv(&self, other: Self, r: Range) -> Result<Self, Error> {
         match self {
             Value::Number(l) => match other {
                 // Truncate the result of the division
@@ -278,7 +278,7 @@ impl Value {
     }
 
     /// Modulo (remainder) of self & other
-    pub fn imod(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
+    pub fn imod(&self, other: Self, r: Range) -> Result<Self, Error> {
         match self {
             Value::Number(l) => match other {
                 Value::Number(r) => Ok(Value::Number(l % r)),
@@ -296,7 +296,7 @@ impl Value {
     }
 
     /// Is self less than/before other
-    pub fn lt(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
+    pub fn lt(&self, other: Self, r: Range) -> Result<Self, Error> {
         match self {
             Value::Number(l) => match other {
                 Value::Number(r) => Ok((*l < r).into()),
@@ -314,7 +314,7 @@ impl Value {
     }
 
     /// Is self greater than other
-    pub fn gt(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
+    pub fn gt(&self, other: Self, r: Range) -> Result<Self, Error> {
         match self {
             Value::Number(l) => match other {
                 Value::Number(r) => Ok((*l > r).into()),
@@ -332,7 +332,7 @@ impl Value {
     }
 
     /// Are self & other equal
-    pub fn eq(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
+    pub fn eq(&self, other: Self, r: Range) -> Result<Self, Error> {
         match self {
             Value::Number(l) => match other {
                 Value::Number(r) => Ok((*l == r).into()),
@@ -359,7 +359,7 @@ impl Value {
             // This should never happen
             Value::Return(_) => Err(Error::runtime(
                 "Internal Error comparison against a placeholder".into(),
-                None,
+                r,
             )),
             Value::Constant(cons) => cons.eq(other, r),
             Value::Array(array_a) => match other {
@@ -386,7 +386,7 @@ impl Value {
     }
 
     /// Not equal
-    pub fn neq(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
+    pub fn neq(&self, other: Self, r: Range) -> Result<Self, Error> {
         // Just invert the value of eq
         match self.eq(other, r)? {
             Value::Boolean(b) => Ok((!b).into()),
@@ -399,7 +399,7 @@ impl Value {
     }
 
     /// Self less than or equal to other
-    pub fn lteq(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
+    pub fn lteq(&self, other: Self, r: Range) -> Result<Self, Error> {
         // Start by checking less than
         match self.lt(other.clone(), r)? {
             Value::Boolean(b) => {
@@ -426,7 +426,7 @@ impl Value {
     }
 
     /// Greater than or equal to
-    pub fn gteq(&self, other: Self, r: Option<Range>) -> Result<Self, Error> {
+    pub fn gteq(&self, other: Self, r: Range) -> Result<Self, Error> {
         // Initaly check greater than
         match self.gt(other.clone(), r)? {
             Value::Boolean(b) => {

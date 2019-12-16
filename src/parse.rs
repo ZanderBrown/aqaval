@@ -164,26 +164,18 @@ fn call(input: &mut Tokens, node: Node) -> NodeResult {
         // Parse any argument and wrap 'node' in a call
         Some(_) => {
             input.next()?;
-            let args = delimited(
+            let (args, e) = delimited(
                 input,
                 &[TokenType::Punctuation(")".into())],
                 &TokenType::Punctuation(",".into()),
                 &mut expression,
                 "Still providing arguments",
-            )?.0;
-            if let Some(ref last) = args.last() {
-                let r = node.range() + last.range();
+            )?;
+            let r = node.range() + e.range();
             Node::new(NodeType::Call(
             Box::new(node),
             args,
             ), r)
-        } else {
-            let r = node.range();
-            Node::new(NodeType::Call(
-                Box::new(node),
-                args,
-                ), r)
-            }
     }
         ,
         // It isn't just pass the node though
@@ -239,12 +231,12 @@ fn atom(input: &mut Tokens) -> NodeResult {
                                 "Still defining parameters",
                             )?;
                             // Get the code block
-                            let (body, _) = block(
+                            let (body, e) = block(
                                 input,
                                 &[TokenType::Keyword("ENDSUBROUTINE".into())],
                                 "Still in subroutine",
                             )?;
-                            let r = nametok.range() + body.range();
+                            let r = nametok.range() + e.range();
                             // Wrap together the name, params & body
                             Ok(Node::new(
                                 NodeType::Subroutine(
@@ -270,14 +262,14 @@ fn atom(input: &mut Tokens) -> NodeResult {
                 // A loop that is run atleast once
                 "REPEAT" => {
                     // Grab the code block
-                    let (body, _) = block(
+                    let (body, e) = block(
                         input,
                         &[TokenType::Keyword("UNTIL".into())],
                         "Still in repeat statement",
                     )?;
                     // Get the limiting expression
                     let cond = expression(input)?;
-                    let r = cond.range() + body.range();
+                    let r = cond.range() + e.range();
                     Ok(Node::new(
                         NodeType::Loop(Box::new(cond), Box::new(body), false),
                         r,
@@ -288,12 +280,12 @@ fn atom(input: &mut Tokens) -> NodeResult {
                     // The expression
                     let cond = expression(input)?;
                     // The loop body
-                    let (body, _) = block(
+                    let (body, e) = block(
                         input,
                         &[TokenType::Keyword("ENDWHILE".into())],
                         "Stil in while loop",
                     )?;
-                    let r = cond.range() + body.range();
+                    let r = cond.range() + e.range();
                     Ok(Node::new(
                         NodeType::Loop(Box::new(cond), Box::new(body), true),
                         r,
@@ -326,12 +318,12 @@ fn atom(input: &mut Tokens) -> NodeResult {
                             // Final counter value
                             let end = expression(input)?;
                             // Loop contents
-                            let (body, _) = block(
+                            let (body, e) = block(
                                 input,
                                 &[TokenType::Keyword("ENDFOR".into())],
                                 "Still in for loop",
                             )?;
-                            let r = t.range() + body.range();
+                            let r = t.range() + e.range();
                             Ok(Node::new(
                                 NodeType::For(
                                     name.clone(),

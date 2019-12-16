@@ -1,4 +1,3 @@
-use crate::location::Point;
 use crate::location::Range;
 
 use std::error;
@@ -13,7 +12,7 @@ pub enum Error {
     /// Errors that occur when further input is expected
     /// Different because they are expected in REPL environments
     EndOfInput(String, Range),
-    Runtime(String, Option<Range>),
+    Runtime(String, Range),
 }
 
 impl Error {
@@ -28,7 +27,7 @@ impl Error {
     }
 
     /// Creates an error about runtime anomoly
-    pub fn runtime(m: String, at: Option<Range>) -> Self {
+    pub fn runtime(m: String, at: Range) -> Self {
         Error::Runtime(m, at)
     }
 
@@ -36,9 +35,7 @@ impl Error {
         match self {
             Self::Parse(_, at) => *at,
             Self::EndOfInput(_, at) => *at,
-            Self::Runtime(_, Some(at)) => *at,
-            // Not great
-            Self::Runtime(_, None) => Range::new(Point::new(0, 0), Point::new(0, 0)),
+            Self::Runtime(_, at) => *at,
         }
     }
 
@@ -56,8 +53,7 @@ impl fmt::Display for Error {
         match self {
             Error::Parse(m, at) => write!(f, "Error Error: {} {}", m, at),
             Error::EndOfInput(m, at) => write!(f, "End of input: {} {}", m, at),
-            Error::Runtime(m, Some(at)) => write!(f, "Anomaly: {} {}", m, at),
-            Error::Runtime(m, None) => write!(f, "Anomaly: {}", m),
+            Error::Runtime(m, at) => write!(f, "Anomaly: {} {}", m, at),
         }
     }
 }

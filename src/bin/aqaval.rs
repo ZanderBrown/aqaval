@@ -17,39 +17,35 @@ use aqaval::Stream;
 use aqaval::Tokens;
 
 pub fn print_error(err: &Error, src: &Tokens) {
-    match err {
-        Error::Parse(_, at) | Error::EndOfInput(_, at) | Error::Runtime(_, Some(at)) => {
-            let line = Colour::Purple
-                .bold()
-                .paint(format!("{}", at.start().line()));
-            let sep = Colour::White.dimmed().paint("|");
-            if let Some(source) = src.get_source(at.start().line()) {
-                eprintln!("{} {}{}", line, sep, Style::default().bold().paint(source));
-            } else {
-                eprintln!("{} {} [err]", line, sep);
-            }
-            eprintln!(
-                "{:idt$} {}{:pad$}{:↑>num$}",
-                " ",
-                sep,
-                "",
-                "↑",
-                idt = line.len(),
-                pad = at.start().column(),
-                num = at.end().column() - at.start().column()
-            );
-            eprintln!(
-                "{:idt$} {}{:pad$}{}",
-                " ",
-                sep,
-                " ",
-                err.message(),
-                idt = line.len(),
-                pad = at.start().column()
-            );
-        }
-        _ => eprintln!("{}", err.message()),
+    let at = err.at();
+    let line = Colour::Purple
+        .bold()
+        .paint(format!("{}", at.start().line()));
+    let sep = Colour::White.dimmed().paint("|");
+    if let Some(source) = src.get_source(at.start().line()) {
+        eprintln!("{} {}{}", line, sep, Style::default().bold().paint(source));
+    } else {
+        eprintln!("{} {} [err]", line, sep);
     }
+    eprintln!(
+        "{:idt$} {}{:pad$}{:↑>num$}",
+        " ",
+        sep,
+        "",
+        "↑",
+        idt = line.len(),
+        pad = at.start().column(),
+        num = at.end().column() - at.start().column()
+    );
+    eprintln!(
+        "{:idt$} {}{:pad$}{}",
+        " ",
+        sep,
+        " ",
+        err.message(),
+        idt = line.len(),
+        pad = at.start().column()
+    );
 }
 
 /// When run without argument we start a REPL prompt
