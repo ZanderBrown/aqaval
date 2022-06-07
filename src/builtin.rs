@@ -127,13 +127,10 @@ fn builtin_code_to_char(store: &mut HashMap<String, Value>, r: Range) -> Result<
 /// RANDOM_INT(start, end), generate a random integer in the range start-end
 fn builtin_random_int(store: &mut HashMap<String, Value>, r: Range) -> Result<Value, Error> {
     // Generate a reasonably random number
-    Ok(Value::Number(
-        thread_rng().gen_range::<isize, isize, isize>(
-            store.fetch("start").int(r)? as isize,
-            // gen_range is exclusive but we want to be inclusive
-            store.fetch("end").int(r)? as isize + 1,
-        ) as f64,
-    ))
+    Ok(Value::Number(thread_rng().gen_range::<isize, _>(
+        // gen_range is exclusive but we want to be inclusive
+        store.fetch("start").int(r)? as isize..store.fetch("end").int(r)? as isize + 1,
+    ) as f64))
 }
 
 /// Declares all the builtin subroutines
