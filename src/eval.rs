@@ -160,7 +160,7 @@ impl Value {
                     // Get the characters
                     s.chars()
                         // From that the first character
-                        .nth(0)
+                        .next()
                         // Return an error is None
                         .ok_or_else(|| {
                             Error::runtime(format!("Can't interpret {} as char", self), r)

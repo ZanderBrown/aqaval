@@ -1,29 +1,38 @@
 #![allow(unknown_lints)]
 
-use std::collections::HashMap;
-use std::env;
 use std::error;
 use std::fs::read_to_string;
-use std::path::Path;
+use std::{collections::HashMap, path::PathBuf};
 
-use ansi_term::{Colour, Style};
-use getopts::Options;
+use clap::Parser;
 use linefeed::{Interface, ReadResult};
+use yansi::{Color::Yellow, Paint, Style};
 
-use aqaval::builtin;
-use aqaval::Error;
-use aqaval::Parsable;
-use aqaval::Stream;
-use aqaval::Tokens;
+use aqaval::{builtin, Error, Parsable, Stream, Tokens};
+
+#[derive(Parser, Debug)]
+#[clap(author="Zander Brown", version, about="AQA Pseudocode Interpreter", long_about = None)]
+struct Args {
+    #[clap(short = 's', long)]
+    /// Show the final state of variables
+    vars: bool,
+    #[clap(short = 'a', long)]
+    /// Show the parsed ast
+    ast: bool,
+    #[clap(short = 'r', long)]
+    /// Show the evaluated value
+    res: bool,
+    /// A file to execute
+    file: Option<PathBuf>,
+}
 
 pub fn print_error(err: &Error, src: &Tokens) {
     let at = err.at();
-    let line = Colour::Purple
-        .bold()
-        .paint(format!("{}", at.start().line()));
-    let sep = Colour::White.dimmed().paint("|");
-    if let Some(source) = src.get_source(at.start().line()) {
-        eprintln!("{} {}{}", line, sep, Style::default().bold().paint(source));
+    let line = Paint::magenta(at.start().line()).bold();
+    let line_len = line.to_string().len();
+    let sep = Paint::white("|").dimmed();
+    if let Some(source) = src.source(at.start().line()) {
+        eprintln!("{} {}{}", line, sep, Paint::default(source).bold());
     } else {
         eprintln!("{} {} [err]", line, sep);
     }
@@ -33,7 +42,7 @@ pub fn print_error(err: &Error, src: &Tokens) {
         sep,
         "",
         "↑",
-        idt = line.len(),
+        idt = line_len,
         pad = at.start().column(),
         num = at.end().column() - at.start().column()
     );
@@ -43,7 +52,7 @@ pub fn print_error(err: &Error, src: &Tokens) {
         sep,
         " ",
         err.message(),
-        idt = line.len(),
+        idt = line_len,
         pad = at.start().column()
     );
 }
@@ -66,21 +75,29 @@ fn repl() -> Result<(), Box<dyn error::Error>> {
         let (ast, tokens) = 'moreinput: loop {
             // We change prompt whilst building a multiline statement
             if building.is_empty() {
-                let y = Colour::Yellow.bold();
-                reader.set_prompt(&format!(
-                    "\x01{}\x02{}\x01{}\x02",
-                    y.prefix(),
-                    "← ",
-                    y.suffix()
-                ))?;
+                let prompt_style = Style::default().fg(Yellow).bold();
+                let mut prompt = String::new();
+                prompt.push('\x01');
+                prompt_style.fmt_prefix(&mut prompt)?;
+                prompt.push('\x02');
+                prompt.push_str("← ");
+                prompt.push('\x01');
+                prompt_style.fmt_suffix(&mut prompt)?;
+                prompt.push('\x02');
+
+                reader.set_prompt(&prompt)?;
             } else {
-                let y = Colour::Yellow.normal();
-                reader.set_prompt(&format!(
-                    "\x01{}\x02{}\x01{}\x02",
-                    y.prefix(),
-                    "- ",
-                    y.suffix()
-                ))?;
+                let prompt_style = Style::default().fg(Yellow);
+                let mut prompt = String::new();
+                prompt.push('\x01');
+                prompt_style.fmt_prefix(&mut prompt)?;
+                prompt.push('\x02');
+                prompt.push_str("- ");
+                prompt.push('\x01');
+                prompt_style.fmt_suffix(&mut prompt)?;
+                prompt.push('\x02');
+
+                reader.set_prompt(&prompt)?;
             }
             // Try and get a line of user input
             if let ReadResult::Input(line) = reader.read_line()? {
@@ -120,14 +137,13 @@ fn repl() -> Result<(), Box<dyn error::Error>> {
                         if let Error::EndOfInput(_, _) = e {
                             // So read more input to the buffer
                             continue 'moreinput;
-                        // Bad syntax
-                        } else {
-                            // Report the error
-                            eprintln!("{} at {}", Colour::Red.bold().paint("↑"), e.at());
-                            print_error(&e, &tokens);
-                            // Clear the buffer and try again
-                            continue 'repl;
+                            // Bad syntax
                         }
+                        // Report the error
+                        eprintln!("{} at {}", Paint::red("↑").bold(), e.at());
+                        print_error(&e, &tokens);
+                        // Clear the buffer and try again
+                        continue 'repl;
                     }
                 }
             }
@@ -137,12 +153,12 @@ fn repl() -> Result<(), Box<dyn error::Error>> {
             // Print the result
             Ok(v) => println!(
                 "{} {}",
-                Colour::Cyan.bold().paint("→"),
-                Style::new().italic().paint(format!("{}", v))
+                Paint::cyan("→").bold(),
+                Style::default().italic().paint(v)
             ),
             // Print the runtime error
             Err(e) => {
-                eprintln!("{} Anomaly", Colour::Red.bold().paint("↑"));
+                eprintln!("{} Anomaly", Paint::red("↑").bold());
                 print_error(&e, &tokens);
             }
         }
@@ -152,53 +168,25 @@ fn repl() -> Result<(), Box<dyn error::Error>> {
 // The entry point
 fn main() -> Result<(), Box<dyn error::Error>> {
     #[cfg(windows)]
-    ansi_term::enable_ansi_support();
+    Paint::enable_windows_ascii();
 
-    // Fetch the arguments into an array
-    let arguments: Vec<String> = env::args().collect();
-    let program = arguments[0].clone();
+    let args = Args::parse();
 
-    // Setup the argument parser
-    let mut opts = Options::new();
-    opts.optflag("h", "help", "print this help menu");
-    opts.optflag("s", "vars", "show the final state of variables");
-    opts.optflag("a", "ast", "show the parsed ast");
-    opts.optflag("r", "res", "show the evaluated value");
-    // Try and parse the arguments
-    let matches = match opts.parse(&arguments[1..]) {
-        // Store the result
-        Ok(m) => m,
-        // Something went wrong
-        Err(f) => {
-            // Display the message
-            println!("{}", f);
-            // Quit early
-            return Ok(());
-        }
-    };
-    // Help was selected
-    if matches.opt_present("h") {
-        // Show some information
-        let brief = format!("Usage: {} FILE", program);
-        print!("{}", opts.usage(&brief));
-        // Quit
-        return Ok(());
-    }
-    // If a file wasn't passed
-    let input = if matches.free.is_empty() {
+    // If a file was passed
+    let path = if let Some(path) = args.file {
+        // Get the filename
+        path
+    } else {
         // Run the REPL
         repl()?;
         // And exit afterwards
         return Ok(());
-    } else {
-        // Get the filename
-        matches.free[0].clone()
     };
+
     // Check the file exists
-    let path = Path::new(&input);
     if path.exists() {
         // Read the file into a string
-        match read_to_string(path) {
+        match read_to_string(&path) {
             Ok(script) => {
                 // Root scope of variables
                 let mut store = HashMap::new();
@@ -209,7 +197,7 @@ fn main() -> Result<(), Box<dyn error::Error>> {
                 match tokens.parse() {
                     Ok(n) => {
                         // If they asked for the reverse AST debug option
-                        if matches.opt_present("a") {
+                        if args.ast {
                             // Print it
                             println!("Reverse AST\n{}", n);
                         }
@@ -217,26 +205,26 @@ fn main() -> Result<(), Box<dyn error::Error>> {
                         match n.eval(&mut store) {
                             // If they asked for the last result
                             Ok(v) => {
-                                if matches.opt_present("r") {
+                                if args.res {
                                     // Print it
                                     println!("-> {}", v);
                                 }
                             }
                             // Something isn't right we their logic
                             Err(e) => {
-                                eprintln!("{} {}", e.at(), Colour::Red.bold().paint("Anomaly"));
+                                eprintln!("{} {}", e.at(), Paint::red("Anomaly").bold());
                                 print_error(&e, &tokens);
                             }
                         }
                     }
                     // Looks like the syntax was wrong
                     Err(e) => {
-                        eprintln!("{} {}", e.at(), Colour::Red.bold().paint("Bad Input"));
+                        eprintln!("{} {}", e.at(), Paint::red("Bad Input").bold());
                         print_error(&e, &tokens);
                     }
                 }
                 // If variable dumping was requested
-                if matches.opt_present("s") {
+                if args.ast {
                     println!("Variables:");
                     // Looks though the key/values
                     for (k, v) in store {
@@ -246,11 +234,11 @@ fn main() -> Result<(), Box<dyn error::Error>> {
                 }
             }
             // Or not...
-            Err(e) => println!("Can't read {}: {}", input, e),
+            Err(e) => println!("Can't read {}: {}", path.display(), e),
         }
     } else {
         // It didn't
-        println!("{} doesn't exist", input);
+        println!("{} doesn't exist", path.display());
     }
 
     Ok(())

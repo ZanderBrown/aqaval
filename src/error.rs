@@ -33,17 +33,13 @@ impl Error {
 
     pub fn at(&self) -> Range {
         match self {
-            Self::Parse(_, at) => *at,
-            Self::EndOfInput(_, at) => *at,
-            Self::Runtime(_, at) => *at,
+            Self::Parse(_, at) | Self::EndOfInput(_, at) | Self::Runtime(_, at) => *at,
         }
     }
 
     pub fn message(&self) -> &str {
         match self {
-            Self::Parse(m, _) => m,
-            Self::EndOfInput(m, _) => m,
-            Self::Runtime(m, _) => m,
+            Self::Parse(m, _) | Self::EndOfInput(m, _) | Self::Runtime(m, _) => m,
         }
     }
 }

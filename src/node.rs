@@ -28,7 +28,7 @@ where
 }
 
 /// The call signature of a subroutine defined outside the language
-/// HashMap of the scope invoked in, Range is the call (for error reporting)
+/// `HashMap` of the scope invoked in, Range is the call (for error reporting)
 pub type NativeSub = fn(&mut HashMap<String, Value>, Range) -> Result<Value, Error>;
 
 #[derive(Clone)]
@@ -361,11 +361,8 @@ impl Node {
                 // Parse a float from the token
                 let num = v.parse();
                 // Get the result or error out
-                let num = num.or_else(|_| {
-                    Err(Error::parse(
-                        format!("Badly formatted number {}", v),
-                        self.range,
-                    ))
+                let num = num.map_err(|_| {
+                    Error::parse(format!("Badly formatted number {}", v), self.range)
                 })?;
                 Ok(Value::Number(num))
             }
@@ -406,7 +403,7 @@ impl Node {
                             format!(
                                 "Wrong number of parameters need ({}) got ({})",
                                 params_as_str(&params),
-                                params_as_str(&arguments)
+                                params_as_str(arguments)
                             ),
                             self.range,
                         ))
@@ -476,7 +473,7 @@ impl Node {
                 // Read a line into the buffer
                 io::stdin()
                     .read_line(&mut input)
-                    .or_else(|_| Err(Error::runtime("Failed to get input".into(), self.range)))?;
+                    .map_err(|_| Error::runtime("Failed to get input".into(), self.range))?;
                 // Remove \n from the end
                 input.pop();
                 Ok(Value::Textual(input))
@@ -504,7 +501,7 @@ impl Node {
                     if (goingup && current > end) || (!goingup && current < end) {
                         // Restore the orignal value
                         if let Some(v) = before {
-                            store.insert(name.clone(), v.clone());
+                            store.insert(name.clone(), v);
                         }
                         // End the loop
                         break last;
@@ -544,7 +541,7 @@ fn array_assign_helper(
                 // Check if we need to go a level deeper
                 let res = array_assign_helper(store, hole, &mut arr[i as usize], val)?;
                 // Update and return the array
-                arr[i as usize] = res.clone();
+                arr[i as usize] = res;
                 Ok(Value::Array(arr.to_vec()))
             }
         } else {

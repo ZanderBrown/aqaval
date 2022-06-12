@@ -11,6 +11,7 @@ pub struct Stream {
 
 impl Stream {
     /// Create a stream from a string
+    #[must_use]
     pub fn new(input: String) -> Self {
         Self {
             input,
@@ -50,11 +51,13 @@ impl Stream {
         self.input.chars().nth(self.pos)
     }
 
+    #[must_use]
     pub fn here(&self) -> Point {
         Point::new(self.line, self.col)
     }
 
-    pub fn get_source(&self, line: usize) -> Option<&str> {
+    #[must_use]
+    pub fn source(&self, line: usize) -> Option<&str> {
         let lines: Vec<&str> = self.input.split('\n').collect();
         if lines.len() >= line {
             Some(lines[line - 1])

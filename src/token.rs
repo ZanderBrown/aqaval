@@ -110,7 +110,7 @@ impl Tokens {
         // If there is a token to peek
         Ok(if let Some(tok) = self.peek()? {
             // And it equals t
-            if *t == **&tok {
+            if *t == *tok {
                 // Return it
                 Some(tok)
             } else {
@@ -176,14 +176,16 @@ impl Tokens {
         }
     }
 
-    /// Wrapper of Stream::here
+    /// Wrapper of `Stream::here`
+    #[must_use]
     pub fn here(&self) -> Point {
         self.input.here()
     }
 
-    /// Wrapper of Stream::get_source
-    pub fn get_source(&self, line: usize) -> Option<&str> {
-        self.input.get_source(line)
+    /// Wrapper of `Stream::source`
+    #[must_use]
+    pub fn source(&self, line: usize) -> Option<&str> {
+        self.input.source(line)
     }
 
     /// Is ch valid to start a symbol
@@ -228,7 +230,7 @@ impl Tokens {
 
     /// Fetch the precedence of op (if known)
     pub fn precedence(&self, op: &str) -> Option<u8> {
-        self.operations.get(&*op).cloned()
+        self.operations.get(&*op).copied()
     }
 
     /// Consumes characters while predicate returns true

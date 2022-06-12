@@ -33,7 +33,7 @@ fn delimited<T>(
             // if statments where we could be looking for ELSE or ENDIF
             for stop in stop {
                 // If we matched a stop token
-                if let Some(m) = input.is(&stop)? {
+                if let Some(m) = input.is(stop)? {
                     // Move past it
                     input.skip(&*m)?;
                     // End the read loop
@@ -47,13 +47,13 @@ fn delimited<T>(
             } else {
                 // Every element past the first should be preceeded
                 // by the seperator token so move over it
-                input.skip(&separator)?;
+                input.skip(separator)?;
                 // The next element might be on a newline
                 input.absorb_newlines()?;
             }
             // Same as above
             for stop in stop {
-                if let Some(m) = input.is(&stop)? {
+                if let Some(m) = input.is(stop)? {
                     input.skip(&m)?;
                     break 'read Ok(m);
                 }
@@ -124,7 +124,7 @@ fn ifelse(input: &mut Tokens) -> NodeResult {
     }
 }
 
-/// Checks if node should be wrapped in ArrayAccess
+/// Checks if node should be wrapped in `ArrayAccess`
 fn indexed(input: &mut Tokens, node: Node) -> NodeResult {
     // If there is a [ parse the indexing
     if input.is(&TokenType::Punctuation("[".into()))?.is_some() {
@@ -181,6 +181,119 @@ fn call(input: &mut Tokens, node: Node) -> NodeResult {
     indexed(input, node)
 }
 
+fn subroutine(input: &mut Tokens) -> NodeResult {
+    // Be forgiving about newlines
+    input.absorb_newlines()?;
+    // Where are we now
+    let start = input.here();
+    // Now we need a name
+    if let Some(nametok) = input.next()? {
+        if let TokenType::Value(name) = &*nametok {
+            // Parse the parameters
+            input.skip(&TokenType::Punctuation("(".into()))?;
+            let (params, _) = delimited(
+                input,
+                &[TokenType::Punctuation(")".into())],
+                &TokenType::Punctuation(",".into()),
+                &mut |input| {
+                    // We need a token
+                    if let Some(p) = input.next()? {
+                        match &*p {
+                            // That's a name
+                            TokenType::Value(p) => Ok(p.clone()),
+                            _ => Err(Error::parse("Expected param name".into(), p.range())),
+                        }
+                    } else {
+                        Err(Error::eof(
+                            "Still defining parameters".into(),
+                            Range::new(input.here(), input.here()),
+                        ))
+                    }
+                },
+                "Still defining parameters",
+            )?;
+            // Get the code block
+            let (body, e) = block(
+                input,
+                &[TokenType::Keyword("ENDSUBROUTINE".into())],
+                "Still in subroutine",
+            )?;
+            let r = nametok.range() + e.range();
+            // Wrap together the name, params & body
+            Ok(Node::new(
+                NodeType::Subroutine(name.clone(), params, Subroutine::Internal(Box::new(body))),
+                r,
+            ))
+        } else {
+            Err(Error::parse(
+                "Expecting subroutine name".to_string(),
+                nametok.range(),
+            ))
+        }
+    } else {
+        Err(Error::eof(
+            "Expecting subroutine name".into(),
+            Range::new(start, input.here()),
+        ))
+    }
+}
+
+fn forloop(t: &Token, input: &mut Tokens) -> NodeResult {
+    input.absorb_newlines()?;
+    // We need a variable name to store the counter in
+    if let Some(name) = input.next()? {
+        if let TokenType::Value(name) = &*name {
+            // For stylistic reasons we have an assign operator now
+            input.skip(&TokenType::Operator(Tokens::ASSIGN.into()))?;
+            // Initial value of the counter
+            let start = expression(input)?;
+            input.skip(&TokenType::Keyword("TO".into()))?;
+            // Final counter value
+            let end = expression(input)?;
+            // Loop contents
+            let (body, e) = block(
+                input,
+                &[TokenType::Keyword("ENDFOR".into())],
+                "Still in for loop",
+            )?;
+            let r = t.range() + e.range();
+            Ok(Node::new(
+                NodeType::For(name.clone(), Box::new(start), Box::new(end), Box::new(body)),
+                r,
+            ))
+        } else {
+            Err(Error::eof("Expected variable name".into(), name.range()))
+        }
+    } else {
+        Err(Error::eof(
+            "Expected variable name".into(),
+            Range::new(input.here(), input.here()),
+        ))
+    }
+}
+
+fn constant(t: &Token, input: &mut Tokens) -> NodeResult {
+    // The name of the constant
+    if let Some(name) = input.next()? {
+        if let TokenType::Value(name) = &*name {
+            input.skip(&TokenType::Operator(Tokens::ASSIGN.into()))?;
+            // The value to give the constant
+            let val = expression(input)?;
+            let r = t.range() + val.range();
+            Ok(Node::new(
+                NodeType::Constant(name.clone(), Box::new(val)),
+                r,
+            ))
+        } else {
+            Err(Error::eof("Expected constant name".into(), name.range()))
+        }
+    } else {
+        Err(Error::eof(
+            "Expected constant name".into(),
+            Range::new(input.here(), input.here()),
+        ))
+    }
+}
 /// Part of a greater expression
 fn atom(input: &mut Tokens) -> NodeResult {
     // Skip any random newlines
@@ -191,69 +304,7 @@ fn atom(input: &mut Tokens) -> NodeResult {
             // It's a keyword
             TokenType::Keyword(kw) => match kw.as_str() {
                 // A subroutine declaration
-                "SUBROUTINE" => {
-                    // Be forgiving about newlines
-                    input.absorb_newlines()?;
-                    // Where are we now
-                    let start = input.here();
-                    // Now we need a name
-                    if let Some(nametok) = input.next()? {
-                        if let TokenType::Value(name) = &*nametok {
-                            // Parse the parameters
-                            input.skip(&TokenType::Punctuation("(".into()))?;
-                            let (params, _) = delimited(
-                                input,
-                                &[TokenType::Punctuation(")".into())],
-                                &TokenType::Punctuation(",".into()),
-                                &mut |input| {
-                                    // We need a token
-                                    if let Some(p) = input.next()? {
-                                        match &*p {
-                                            // That's a name
-                                            TokenType::Value(p) => Ok(p.clone()),
-                                            _ => Err(Error::parse(
-                                                "Expected param name".into(),
-                                                p.range(),
-                                            )),
-                                        }
-                                    } else {
-                                        Err(Error::eof(
-                                            "Still defining parameters".into(),
-                                            Range::new(input.here(), input.here()),
-                                        ))
-                                    }
-                                },
-                                "Still defining parameters",
-                            )?;
-                            // Get the code block
-                            let (body, e) = block(
-                                input,
-                                &[TokenType::Keyword("ENDSUBROUTINE".into())],
-                                "Still in subroutine",
-                            )?;
-                            let r = nametok.range() + e.range();
-                            // Wrap together the name, params & body
-                            Ok(Node::new(
-                                NodeType::Subroutine(
-                                    name.clone(),
-                                    params,
-                                    Subroutine::Internal(Box::new(body)),
-                                ),
-                                r,
-                            ))
-                        } else {
-                            Err(Error::parse(
-                                format!("Expecting subroutine name"),
-                                nametok.range(),
-                            ))
-                        }
-                    } else {
-                        Err(Error::eof(
-                            "Expecting subroutine name".into(),
-                            Range::new(start, input.here()),
-                        ))
-                    }
-                }
+                "SUBROUTINE" => subroutine(input),
                 // A loop that is run atleast once
                 "REPEAT" => {
                     // Grab the code block
@@ -300,67 +351,9 @@ fn atom(input: &mut Tokens) -> NodeResult {
                 // there own parsing methon
                 "IF" => ifelse(input),
                 // A loop with a counter
-                "FOR" => {
-                    input.absorb_newlines()?;
-                    // We need a variable name to store the counter in
-                    if let Some(name) = input.next()? {
-                        if let TokenType::Value(name) = &*name {
-                            // For stylistic reasons we have an assign operator now
-                            input.skip(&TokenType::Operator(Tokens::ASSIGN.into()))?;
-                            // Initial value of the counter
-                            let start = expression(input)?;
-                            input.skip(&TokenType::Keyword("TO".into()))?;
-                            // Final counter value
-                            let end = expression(input)?;
-                            // Loop contents
-                            let (body, e) = block(
-                                input,
-                                &[TokenType::Keyword("ENDFOR".into())],
-                                "Still in for loop",
-                            )?;
-                            let r = t.range() + e.range();
-                            Ok(Node::new(
-                                NodeType::For(
-                                    name.clone(),
-                                    Box::new(start),
-                                    Box::new(end),
-                                    Box::new(body),
-                                ),
-                                r,
-                            ))
-                        } else {
-                            Err(Error::eof("Expected variable name".into(), name.range()))
-                        }
-                    } else {
-                        Err(Error::eof(
-                            "Expected variable name".into(),
-                            Range::new(input.here(), input.here()),
-                        ))
-                    }
-                }
+                "FOR" => forloop(&t, input),
                 // Define a constant variable
-                "constant" => {
-                    // The name of the constant
-                    if let Some(name) = input.next()? {
-                        if let TokenType::Value(name) = &*name {
-                            input.skip(&TokenType::Operator(Tokens::ASSIGN.into()))?;
-                            // The value to give the constant
-                            let val = expression(input)?;
-                            let r = t.range() + val.range();
-                            Ok(Node::new(
-                                NodeType::Constant(name.clone(), Box::new(val)),
-                                r,
-                            ))
-                        } else {
-                            Err(Error::eof("Expected constant name".into(), name.range()))
-                        }
-                    } else {
-                        Err(Error::eof(
-                            "Expected constant name".into(),
-                            Range::new(input.here(), input.here()),
-                        ))
-                    }
-                }
+                "constant" => constant(&t, input),
                 // Marker that the following expression should be
                 // treated as boolean and inverted
                 "NOT" => {
@@ -439,7 +432,7 @@ fn block(input: &mut Tokens, close: &[TokenType], err: &str) -> Result<(Node, To
         err,
     )?;
     // Return the result with the Vec<Node> wrapped as a block
-    if let Some(ref first) = b.first() {
+    if let Some(first) = b.first() {
         let r = first.range() + m.range();
         Ok((Node::new(NodeType::Block(b), r), m))
     } else {
@@ -454,7 +447,7 @@ fn binary(input: &mut Tokens, left: Node, parent: u8) -> NodeResult {
         if let TokenType::Operator(v) = &*tok {
             // Lookup the precedence of the operator
             let this = input
-                .precedence(&v)
+                .precedence(v)
                 .ok_or_else(|| Error::parse("Unknown operator".into(), tok.range()))?;
             // I'm more important
             // (I'm afraid i don't totally understand
@@ -507,7 +500,7 @@ impl Parsable for Tokens {
         self.absorb_newlines()?;
         let start = self.here();
         // While there are remaining tokens
-        while let Some(_) = self.peek()? {
+        while self.peek()?.is_some() {
             // Parse an expression and add it to list
             prog.push(expression(self)?);
             // Skip any following newline

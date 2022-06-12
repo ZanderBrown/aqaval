@@ -87,12 +87,9 @@ fn builtin_string_to_int(store: &mut HashMap<String, Value>, r: Range) -> Result
 fn builtin_string_to_real(store: &mut HashMap<String, Value>, r: Range) -> Result<Value, Error> {
     let text = store.fetch("string").string(r)?;
     // Fail if we can't parse the string
-    Ok(Value::Number(text.parse().or_else(|_| {
-        Err(Error::runtime(
-            format!("Badly formatted number {}", text),
-            r,
-        ))
-    })?))
+    text.parse()
+        .map(Value::Number)
+        .map_err(|_| Error::runtime(format!("Badly formatted number {}", text), r))
 }
 
 /// INT_TO_STRING(num), get a string representation of an integer
