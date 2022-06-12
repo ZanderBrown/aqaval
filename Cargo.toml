@@ -4,6 +4,6 @@ version = "0.1.0"
 authors = ["Zander Brown <ZanderBrown@users.noreply.github.com>"]
 
 [dependencies]
-rand = "0.5.1"
+rand = "0.8.5"
 getopts = "0.2.17"
-readline = "0.0.13"
+linefeed = "0.6.0"

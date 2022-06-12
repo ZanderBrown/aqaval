@@ -250,7 +250,7 @@ impl Node {
                         match *left {
                             Node::Value(left) => {
                                 // Remove the current value
-                                let mut curr = store
+                                let curr = store
                                     .insert(left.clone(), Value::None)
                                     .map_or(Value::None, |s| s);
                                 match curr {
@@ -426,10 +426,13 @@ impl Node {
             Node::Output(n) => {
                 // Print the value of an expression
                 let v = n.eval(store)?;
-                println!("{}", match v {
-                    Value::Number(n) => n.to_string(),
-                    _ => v.string()?
-                });
+                println!(
+                    "{}",
+                    match v {
+                        Value::Number(n) => n.to_string(),
+                        _ => v.string()?,
+                    }
+                );
                 Ok(v)
             }
             Node::Input => {

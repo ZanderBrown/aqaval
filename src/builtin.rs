@@ -116,15 +116,14 @@ fn builtin_code_to_char(store: &mut HashMap<String, Value>) -> Result<Value, Run
 /// RANDOM_INT(start, end), generate a random integer in the range start-end
 fn builtin_random_int(store: &mut HashMap<String, Value>) -> Result<Value, Runtime> {
     // Generate a reasonably random number
-    Ok(Value::Number(thread_rng().gen_range::<isize>(
-        store.fetch("start").int()? as isize,
+    Ok(Value::Number(thread_rng().gen_range::<isize, _>(
         // gen_range is exclusive but we want to be inclusive
-        store.fetch("end").int()? as isize + 1,
+        store.fetch("start").int()? as isize..store.fetch("end").int()? as isize + 1,
     ) as f64))
 }
 
 /// Declares all the builtin subroutines
-pub fn init(store: &mut Variables) {
+pub fn init(store: &mut dyn Variables) {
     store.declare_sub("LEN", &["item"], builtin_len);
     store.declare_sub("POSITION", &["string", "char"], builtin_position);
     store.declare_sub("SUBSTRING", &["start", "end", "string"], builtin_substring);

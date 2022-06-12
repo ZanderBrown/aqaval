@@ -11,7 +11,7 @@ fn delimited<T>(
     input: &mut Tokens,
     stop: &[Token],
     separator: &Token,
-    parser: &mut FnMut(&mut Tokens) -> Result<T, Syntax>,
+    parser: &mut dyn FnMut(&mut Tokens) -> Result<T, Syntax>,
     err: &str,
 ) -> Result<(Vec<T>, Token), Syntax> {
     // The list we will return

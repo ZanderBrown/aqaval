@@ -64,17 +64,21 @@ impl Value {
     pub fn int(&self) -> Result<f64, Runtime> {
         match self {
             // If the value if integer
-            Value::Number(n) => if (n.trunc() - *n).abs() == 0.0 {
-                Ok(*n)
-            } else {
-                Err(Runtime::new(format!("Expected integer got {}", n)))
-            },
+            Value::Number(n) => {
+                if (n.trunc() - *n).abs() == 0.0 {
+                    Ok(*n)
+                } else {
+                    Err(Runtime::new(format!("Expected integer got {}", n)))
+                }
+            }
             // Allow boolean to be integer
-            Value::Boolean(b) => if *b {
-                Ok(1.0)
-            } else {
-                Ok(0.0)
-            },
+            Value::Boolean(b) => {
+                if *b {
+                    Ok(1.0)
+                } else {
+                    Ok(0.0)
+                }
+            }
             Value::Constant(cons) => cons.int(),
             _ => Err(Runtime::new(format!("Expected integer got {}", self))),
         }
@@ -85,11 +89,13 @@ impl Value {
         match self {
             Value::Number(n) => Ok(n.trunc()),
             // Allow boolean to be integer
-            Value::Boolean(b) => if *b {
-                Ok(1.0)
-            } else {
-                Ok(0.0)
-            },
+            Value::Boolean(b) => {
+                if *b {
+                    Ok(1.0)
+                } else {
+                    Ok(0.0)
+                }
+            }
             Value::Constant(cons) => cons.intt(),
             _ => Err(Runtime::new(format!("Expected integer got {}", self))),
         }
@@ -99,11 +105,13 @@ impl Value {
     pub fn real(&self) -> Result<f64, Runtime> {
         match self {
             Value::Number(n) => Ok(*n),
-            Value::Boolean(b) => if *b {
-                Ok(1.0)
-            } else {
-                Ok(0.0)
-            },
+            Value::Boolean(b) => {
+                if *b {
+                    Ok(1.0)
+                } else {
+                    Ok(0.0)
+                }
+            }
             Value::Constant(cons) => cons.real(),
             _ => Err(Runtime::new(format!("Expected real got {}", self))),
         }
@@ -130,9 +138,9 @@ impl Value {
                 } else {
                     // Get the characters
                     s.chars()
-                    // From that the first character
+                        // From that the first character
                         .nth(0)
-                    // Return an error is None
+                        // Return an error is None
                         .ok_or_else(|| Runtime::new(format!("Can't interpret {} as char", self)))
                 }
             }

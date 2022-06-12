@@ -15,25 +15,29 @@ mod token;
 
 use std::collections::HashMap;
 use std::env;
+use std::error::Error;
 use std::fs::read_to_string;
 use std::path::Path;
 
 use getopts::Options;
-use readline::{add_history, readline, Error};
+use linefeed::{Interface, ReadResult};
 
 // Arguments parsing lib
 extern crate getopts;
 // For the builtin random_int function
 extern crate rand;
 // Nice way to get user input in the repl
-extern crate readline;
+extern crate linefeed;
 
 /// When run without argument we start a REPL prompt
-fn repl() {
+fn repl() -> Result<(), Box<dyn Error>> {
     // Where variables are stored
     let mut store = HashMap::new();
     // Adds all the built in function to store
     init(&mut store);
+
+    let reader = Interface::new("aqaval")?;
+
     // The mainloop
     'repl: loop {
         // Input buffer for multiline statements
@@ -43,26 +47,25 @@ fn repl() {
         let ast = 'moreinput: loop {
             // We change prompt whilst building a multiline statement
             let prompt = if building.is_empty() { "← " } else { "- " };
+            reader.set_prompt(prompt)?;
             // Try and get a line of user input
-            match readline(prompt) {
+            match reader.read_line()? {
                 // We got a line
-                Ok(line) => {
+                ReadResult::Input(line) => {
                     // They just hit enter without typing anything
                     if line.is_empty() {
                         // Get another line
                         continue;
                     }
                     // Add the line to history
-                    if let Err(err) = add_history(&line) {
-                        println!("Problem proccesing input: {}", err);
-                    }
+                    reader.add_history(line.clone());
                     // If we aren't building a multiline
                     if building.is_empty() {
                         // Match the line aganist some repl
                         // specific keywords
                         match line.trim() {
                             // Quits the REPL
-                            ".quit" => return,
+                            ".quit" => return Ok(()),
                             // Shows some information and reads a new line
                             ".about" => {
                                 println!("AQAVal by Zander Brown");
@@ -79,29 +82,26 @@ fn repl() {
                         // the parsed statement
                         Ok(n) => break n,
                         // It failed because further input was expected
-                        Err(e) => if let Syntax::EndOfInput(_) = e {
-                            // So read more input to the buffer
-                            continue 'moreinput;
-                        // Bad syntax
-                        } else {
-                            // Report the error
-                            println!("↑ {}", e);
-                            // Clear the buffer and try again
-                            continue 'repl;
-                        },
+                        Err(e) => {
+                            if let Syntax::EndOfInput(_) = e {
+                                // So read more input to the buffer
+                                continue 'moreinput;
+                            // Bad syntax
+                            } else {
+                                // Report the error
+                                println!("↑ {}", e);
+                                // Clear the buffer and try again
+                                continue 'repl;
+                            }
+                        }
                     }
                 }
-                // Couldn't get a line of input
-                Err(err) => match err {
-                    // Because Ctrl-D was sent
-                    Error::EndOfFile => {
-                        // Quit the REPL
-                        println!("[QUIT]");
-                        return;
-                    }
-                    // Something else
-                    _ => println!("Problem reading input: {}", err),
-                },
+                ReadResult::Eof => {
+                    // Quit the REPL
+                    println!("[QUIT]");
+                    return Ok(());
+                }
+                r => println!("Problem reading input: {:?}", r),
             }
         };
         // Evaluate the parsed statement
@@ -115,7 +115,7 @@ fn repl() {
 }
 
 // The entry point
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     // Fetch the arguments into an array
     let arguments: Vec<String> = env::args().collect();
     let program = arguments[0].clone();
@@ -135,7 +135,7 @@ fn main() {
             // Display the message
             println!("{}", f);
             // Quit early
-            return;
+            return Ok(());
         }
     };
     // Help was selected
@@ -144,14 +144,14 @@ fn main() {
         let brief = format!("Usage: {} FILE", program);
         print!("{}", opts.usage(&brief));
         // Quit
-        return;
+        return Ok(());
     }
     // If a file wasn't passed
     let input = if matches.free.is_empty() {
         // Run the REPL
-        repl();
+        repl()?;
         // And exit afterwards
-        return;
+        return Ok(());
     } else {
         // Get the filename
         matches.free[0].clone()
@@ -177,10 +177,12 @@ fn main() {
                         // Run the users program!
                         match n.eval(&mut store) {
                             // If they asked for the last result
-                            Ok(v) => if matches.opt_present("r") {
-                                // Print it
-                                println!("-> {}", v);
-                            },
+                            Ok(v) => {
+                                if matches.opt_present("r") {
+                                    // Print it
+                                    println!("-> {}", v);
+                                }
+                            }
                             // Something isn't right we their logic
                             Err(e) => println!("{}", e),
                         }
@@ -205,4 +207,6 @@ fn main() {
         // It didn't
         println!("{} doesn't exist", input);
     }
+
+    Ok(())
 }

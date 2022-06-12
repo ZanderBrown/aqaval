@@ -50,14 +50,8 @@ impl fmt::Display for Token {
             f,
             "{}",
             match self {
-                Token::Punctuation(s) => format!(
-                    "'{}'",
-                    if s == "\n" {
-                        "\\n".into()
-                    } else {
-                        s.clone()
-                    }
-                ),
+                Token::Punctuation(s) =>
+                    format!("'{}'", if s == "\n" { "\\n".into() } else { s.clone() }),
                 Token::Keyword(s) => s.to_string(),
                 Token::Operator(s) => format!("[{}]", s),
                 Token::Value(s) => format!("`{}`", s),
@@ -196,7 +190,7 @@ impl Tokens {
     }
 
     /// Consumes characters while predicate returns true
-    fn read_while(&mut self, predicate: &mut FnMut(&mut Self, char) -> bool) -> String {
+    fn read_while(&mut self, predicate: &mut dyn FnMut(&mut Self, char) -> bool) -> String {
         // The string we will return
         let mut s = String::new();
         // Read whilst charecters are still available
